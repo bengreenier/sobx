@@ -37,11 +37,13 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@25.3.3)(@vitest/browser-playwright@4.0.18)(terser@5.46.0)(tsx@4.21.0)
 
+  packages/core: {}
+
   packages/example-esbuild:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@sobx/compiler':
         specifier: workspace:*
@@ -60,7 +62,7 @@ importers:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@sobx/compiler':
         specifier: workspace:*
@@ -79,7 +81,7 @@ importers:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@rollup/plugin-typescript':
         specifier: ^11.1.6
@@ -101,7 +103,7 @@ importers:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@rspack/cli':
         specifier: ^1.7.7
@@ -123,7 +125,7 @@ importers:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@sobx/compiler':
         specifier: workspace:*
@@ -142,7 +144,7 @@ importers:
     dependencies:
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
     devDependencies:
       '@sobx/compiler':
         specifier: workspace:*
@@ -163,8 +165,6 @@ importers:
         specifier: ^6.0.0
         version: 6.0.1(webpack@5.105.4)
 
-  packages/sobx: {}
-
   packages/sobx-compiler:
     dependencies:
       '@babel/generator':
@@ -181,7 +181,7 @@ importers:
         version: 7.29.0
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
       unplugin:
         specifier: ^3.0.0
         version: 3.0.0
@@ -227,7 +227,7 @@ importers:
         version: link:../sobx-compiler
       '@sobx/core':
         specifier: workspace:*
-        version: link:../sobx
+        version: link:../core
       mobx:
         specifier: ^6.15.0
         version: 6.15.0
