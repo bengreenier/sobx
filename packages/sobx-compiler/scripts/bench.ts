@@ -75,6 +75,14 @@ function stripMobxImport(code: string): string {
 	);
 }
 
+/** Remove TypeScript declare for iterations (vm runs JS, not TS). */
+function stripDeclareIterations(code: string): string {
+	return code.replace(
+		/(?:\/\*\*[^*]*\*\*\/\s*\n?\s*)?declare\s+const\s+iterations\s*:\s*number\s*;?\s*\n?/g,
+		"",
+	);
+}
+
 /** Remove ESM import of @sobx/core so we can run in vm with ProxyLike in context. */
 function stripSobxImport(code: string): string {
 	return code.replace(
@@ -84,7 +92,7 @@ function stripSobxImport(code: string): string {
 }
 
 function runMobX(basename: string, iterations: number): number {
-	const source = stripMobxImport(loadBenchSource(basename));
+	const source = stripDeclareIterations(stripMobxImport(loadBenchSource(basename)));
 	const context = {
 		observable,
 		reaction,
@@ -101,7 +109,9 @@ function runMobX(basename: string, iterations: number): number {
 function runSobx(basename: string, iterations: number): number {
 	const source = loadBenchSource(basename);
 	const compiled = compileToSobx(source);
-	const code = stripSobxImport(stripMobxImport(compiled));
+	const code = stripDeclareIterations(
+		stripSobxImport(stripMobxImport(compiled)),
+	);
 	const context = {
 		ProxyLike,
 		runInAction: (fn: () => void) => fn(),

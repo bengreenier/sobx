@@ -5,8 +5,18 @@ export default defineConfig({
 	build: {
 		lib: {
 			formats: ["es", "cjs"],
-			entry: "src/index.ts",
-			fileName: (format) => (format === "es" ? "index.js" : "index.cjs"),
+			entry: {
+				index: "src/index.ts",
+				core: "src/core.ts",
+				vite: "src/vite.ts",
+				rollup: "src/rollup.ts",
+				webpack: "src/webpack.ts",
+				esbuild: "src/esbuild.ts",
+				rolldown: "src/rolldown.ts",
+				rspack: "src/rspack.ts",
+			},
+			fileName: (format, entryName) =>
+				entryName + (format === "es" ? ".js" : ".cjs"),
 		},
 		rollupOptions: {
 			external: [
@@ -14,6 +24,17 @@ export default defineConfig({
 				"unplugin",
 				"unplugin-ast",
 				"unplugin-ast/vite",
+				"unplugin-ast/rollup",
+				"unplugin-ast/webpack",
+				"unplugin-ast/esbuild",
+				"unplugin-ast/rolldown",
+				"unplugin-ast/rspack",
+				"vite",
+				"rollup",
+				"webpack",
+				"esbuild",
+				"rolldown",
+				"rspack",
 			],
 		},
 	},

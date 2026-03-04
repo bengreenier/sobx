@@ -1,21 +1,11 @@
-import AST from "unplugin-ast/vite";
 import type { Plugin } from "vite";
-import { ObservableTransformer } from "./transformers/observable.js";
-import { ReactionTransformer } from "./transformers/reaction.js";
-import { MemberExpressionTransformer } from "./transformers/member-expression.js";
-import { AssignmentExpressionTransformer } from "./transformers/assignment-expression.js";
-import { ImportInjectionTransformer } from "./transformers/import-injection.js";
+import AST from "unplugin-ast/vite";
+import {
+	createSobxCompiler,
+	type SobxCompilerOptions,
+} from "./core.js";
 
-export interface SobxCompilerOptions {
-	/**
-	 * Include pattern for files to transform (default: /\.[jt]sx?$/).
-	 */
-	include?: string | RegExp | (string | RegExp)[];
-	/**
-	 * Exclude pattern for files to skip.
-	 */
-	exclude?: string | RegExp | (string | RegExp)[];
-}
+const compiler = createSobxCompiler(AST as import("./core.js").ASTPluginFactory);
 
 /**
  * Vite plugin that compiles MobX-style code (observable, direct property access, reaction)
@@ -23,19 +13,7 @@ export interface SobxCompilerOptions {
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
 export function sobxCompiler(options: SobxCompilerOptions = {}): Plugin[] {
-	const { include = /\.[jt]sx?$/, exclude } = options;
-
-	return [
-		AST({
-			include: include as RegExp,
-			exclude,
-			transformer: [
-				ObservableTransformer(),
-				ReactionTransformer(),
-				MemberExpressionTransformer(),
-				AssignmentExpressionTransformer(),
-				ImportInjectionTransformer(),
-			],
-		}) as Plugin,
-	];
+	return [compiler(options) as Plugin];
 }
+
+export type { SobxCompilerOptions } from "./core.js";
