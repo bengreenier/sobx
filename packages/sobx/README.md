@@ -1,5 +1,7 @@
 # sobx
 
+**Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
+
 Virtual MobX-compatible API for use with the sobx compiler. **Do not call these at runtime**—they throw. The [@sobx/compiler](https://github.com/sobx/sobx/tree/main/packages/sobx-compiler) rewrites your code so that `observable`, `reaction`, and `runInAction` are replaced with compiled output.
 
 Use this package when migrating from MobX: keep the same API surface and switch your imports from `"mobx"` to `"sobx"`, then add the compiler to your build.

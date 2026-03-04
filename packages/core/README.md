@@ -1,5 +1,7 @@
 # @sobx/core
 
+**Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
+
 Lightweight observable proxy runtime for sobx. Tracks property changes via explicit `get` / `set` calls and notifies observers—faster than a native `Proxy` by avoiding trap overhead.
 
 ## Install

@@ -1,5 +1,7 @@
 # @sobx/compiler
 
+**Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
+
 Compiles sobx usage: rewrites `observable`, `reaction`, and `runInAction` imported from a configurable module (default `"sobx"`) into code that uses `@sobx/core`. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack.
 
 ## Install
