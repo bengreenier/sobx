@@ -13,18 +13,11 @@ export interface SobxCompilerOptions {
 	 * Exclude pattern for files to skip.
 	 */
 	exclude?: string | RegExp | (string | RegExp)[];
+	/**
+	 * Module specifier to treat as sobx (only transform when imported from here). Default `"sobx"`.
+	 */
+	moduleSpecifier?: string;
 }
-
-// Reaction before MemberExpression so we replace reaction() as a whole first; the reaction
-// replacement is self-contained (buildReactionExpression uses transformObservableMemberReads
-// so inner store.count -> store.get("count")), avoiding magic-string "already been edited" errors.
-const SOBX_TRANSFORMERS = [
-	ObservableTransformer(),
-	ReactionTransformer(),
-	MemberExpressionTransformer(),
-	AssignmentExpressionTransformer(),
-	ImportInjectionTransformer(),
-];
 
 export type ASTPluginFactory = (opts: {
 	include?: RegExp;
@@ -32,17 +25,34 @@ export type ASTPluginFactory = (opts: {
 	transformer: unknown[];
 }) => unknown;
 
+// Reaction before MemberExpression so we replace reaction() as a whole first; the reaction
+// replacement is self-contained (buildReactionExpression uses transformObservableMemberReads
+// so inner store.count -> store.get("count")), avoiding magic-string "already been edited" errors.
+function createTransformers(moduleSpecifier: string) {
+	return [
+		ObservableTransformer(moduleSpecifier),
+		ReactionTransformer(moduleSpecifier),
+		MemberExpressionTransformer(moduleSpecifier),
+		AssignmentExpressionTransformer(moduleSpecifier),
+		ImportInjectionTransformer(),
+	];
+}
+
 /**
  * Creates the sobx compiler plugin for a given unplugin-ast bundler entry.
  * Use with unplugin-ast/vite, unplugin-ast/rollup, unplugin-ast/webpack, etc.
  */
 export function createSobxCompiler(ast: ASTPluginFactory) {
 	return function sobxCompiler(options: SobxCompilerOptions = {}) {
-		const { include = /\.[jt]sx?$/, exclude } = options;
+		const {
+			include = /\.[jt]sx?$/,
+			exclude,
+			moduleSpecifier = "sobx",
+		} = options;
 		return ast({
 			include: include as RegExp,
 			exclude,
-			transformer: SOBX_TRANSFORMERS,
+			transformer: createTransformers(moduleSpecifier),
 		});
 	};
 }

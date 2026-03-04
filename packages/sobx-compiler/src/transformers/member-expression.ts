@@ -37,7 +37,7 @@ function isInsideReactionCall(
  * Skips member expressions inside reaction() so we don't overwrite a span already replaced by ReactionTransformer.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
-export function MemberExpressionTransformer() {
+export function MemberExpressionTransformer(moduleSpecifier = "sobx") {
 	return {
 		onNode(
 			node: t.Node,
@@ -70,7 +70,7 @@ export function MemberExpressionTransformer() {
 			) {
 				return undefined;
 			}
-			const observableIds = collectObservableBindings(program);
+			const observableIds = collectObservableBindings(program, moduleSpecifier);
 			if (!observableIds.has(node.object.name)) return undefined;
 
 			const key = getMemberKey(node.property);

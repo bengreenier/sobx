@@ -7,7 +7,7 @@ import { collectObservableBindings, getMemberKey } from "../transform.js";
  * Custom transformer (unplugin-ast style): replaces obj.key = value with obj.set('key', value) when obj is an observable.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
-export function AssignmentExpressionTransformer() {
+export function AssignmentExpressionTransformer(moduleSpecifier = "sobx") {
 	return {
 		onNode(node: t.Node): node is t.AssignmentExpression {
 			return (
@@ -30,7 +30,10 @@ export function AssignmentExpressionTransformer() {
 				sourceType: "module",
 				plugins: ["typescript", "jsx"],
 			});
-			const observableIds = collectObservableBindings(ast.program);
+			const observableIds = collectObservableBindings(
+				ast.program,
+				moduleSpecifier,
+			);
 			if (!observableIds.has(left.object.name)) return undefined;
 
 			const key = getMemberKey(left.property);

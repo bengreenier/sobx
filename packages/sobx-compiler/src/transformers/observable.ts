@@ -7,10 +7,10 @@ const PROXY_LIKE = "ProxyLike";
 
 /**
  * Custom transformer (unplugin-ast style): replaces observable(source) with new ProxyLike(source)
- * only when observable is imported from "sobx".
+ * only when observable is imported from the given sobx source.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
-export function ObservableTransformer() {
+export function ObservableTransformer(moduleSpecifier = "sobx") {
 	return {
 		onNode(node: t.Node): node is t.CallExpression {
 			return (
@@ -29,6 +29,7 @@ export function ObservableTransformer() {
 			});
 			const { observable: sobxObservableNames } = getSobxImportLocalNames(
 				ast.program,
+				moduleSpecifier,
 			);
 			if (
 				!t.isIdentifier(node.callee) ||

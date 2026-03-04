@@ -7,20 +7,25 @@ const PROXY_LIKE = "ProxyLike";
 const OBSERVABLE_CALLEE = "observable";
 const REACTION_CALLEE = "reaction";
 
-/** Module specifier we treat as sobx (only transform when imported from here). */
-const SOBX_SOURCE = "sobx";
+const DEFAULT_MODULE_SPECIFIER = "sobx";
 
 export interface SobxImportLocalNames {
 	observable: Set<string>;
 	reaction: Set<string>;
 }
 
+export interface TransformSobxOptions {
+	/** Module specifier to treat as sobx (only transform when imported from here). Default `"sobx"`. */
+	moduleSpecifier?: string;
+}
+
 /**
- * Collect local names that are bound to `observable` or `reaction` from an import of "sobx".
+ * Collect local names that are bound to `observable` or `reaction` from an import of the given source.
  * Handles named imports and aliases (e.g. `import { observable as o } from "sobx"` → o in observable set).
  */
 export function getSobxImportLocalNames(
 	program: t.Program,
+	moduleSpecifier: string = DEFAULT_MODULE_SPECIFIER,
 ): SobxImportLocalNames {
 	const observable = new Set<string>();
 	const reaction = new Set<string>();
@@ -28,7 +33,8 @@ export function getSobxImportLocalNames(
 	for (const stmt of program.body) {
 		if (!t.isImportDeclaration(stmt)) continue;
 		const source = stmt.source;
-		if (!t.isStringLiteral(source) || source.value !== SOBX_SOURCE) continue;
+		if (!t.isStringLiteral(source) || source.value !== moduleSpecifier)
+			continue;
 
 		for (const spec of stmt.specifiers) {
 			if (!t.isImportSpecifier(spec)) continue;
@@ -49,11 +55,17 @@ export function getSobxImportLocalNames(
 
 /**
  * Collect all binding names that are assigned a value from `observable(...)` when that call
- * refers to `observable` imported from "sobx".
+ * refers to `observable` imported from the given sobx source.
  * Only handles simple patterns: `const x = observable(...)`, `let x = observable(...)`, `x = observable(...)`.
  */
-export function collectObservableBindings(program: t.Program): Set<string> {
-	const { observable: sobxObservableNames } = getSobxImportLocalNames(program);
+export function collectObservableBindings(
+	program: t.Program,
+	moduleSpecifier: string = DEFAULT_MODULE_SPECIFIER,
+): Set<string> {
+	const { observable: sobxObservableNames } = getSobxImportLocalNames(
+		program,
+		moduleSpecifier,
+	);
 	const observableIds = new Set<string>();
 
 	traverse(program, {
@@ -108,13 +120,17 @@ export function getMemberKey(
 /**
  * Transform the AST: observable() -> new ProxyLike(), property access -> .get()/.set(), reaction -> sobx reaction.
  */
-export function transformSobx(program: t.Program): {
+export function transformSobx(
+	program: t.Program,
+	options: TransformSobxOptions = {},
+): {
 	ast: t.Program;
 	needsProxyLike: boolean;
 	needsReaction: boolean;
 } {
-	const sobxNames = getSobxImportLocalNames(program);
-	const observableIds = collectObservableBindings(program);
+	const moduleSpecifier = options.moduleSpecifier ?? DEFAULT_MODULE_SPECIFIER;
+	const sobxNames = getSobxImportLocalNames(program, moduleSpecifier);
+	const observableIds = collectObservableBindings(program, moduleSpecifier);
 	let needsProxyLike = false;
 	let needsReaction = false;
 

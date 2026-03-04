@@ -3,17 +3,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import generate from "@babel/generator";
 import { parse } from "@babel/parser";
+import type { TransformSobxOptions } from "./transform.js";
 import { transformSobx } from "./transform.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "__fixtures__");
 
-function compile(source: string): string {
+function compile(source: string, options?: TransformSobxOptions): string {
 	const ast = parse(source, {
 		sourceType: "module",
 		plugins: ["typescript"],
 	});
-	const { ast: transformed } = transformSobx(ast.program);
+	const { ast: transformed } = transformSobx(ast.program, options);
 	return generate(transformed).code;
 }
 
@@ -93,5 +94,14 @@ reaction(() => store.count, (n) => console.log(n));`;
 		expect(output).not.toContain("addObserver");
 		expect(output).toMatch(/observable\s*\(\s*\{\s*count:\s*0\s*\}/);
 		expect(output).toMatch(/reaction\s*\(\s*\(\)\s*=>\s*store\.count/);
+	});
+
+	it("respects moduleSpecifier option (custom module specifier)", () => {
+		const input = `import { observable } from "my-sobx";
+const state = observable({ n: 0 });`;
+		const output = compile(input, { moduleSpecifier: "my-sobx" });
+		expect(output).toContain('from "my-sobx"');
+		expect(output).toContain("ProxyLike");
+		expect(output).toContain("new ProxyLike({");
 	});
 });

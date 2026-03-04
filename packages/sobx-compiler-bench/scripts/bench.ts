@@ -58,7 +58,9 @@ function compileToSobx(source: string): string {
 		sourceType: "module",
 		plugins: ["typescript"],
 	});
-	const { ast: transformed } = transformSobx(ast.program);
+	const { ast: transformed } = transformSobx(ast.program, {
+		moduleSpecifier: "mobx",
+	});
 	const gen =
 		"default" in generate &&
 		typeof (generate as { default: unknown }).default === "function"

@@ -1,10 +1,12 @@
 export type { SobxCompilerOptions } from "./plugin.js";
 export { sobxCompiler } from "./plugin.js";
+export type { TransformSobxOptions } from "./transform.js";
 export {
 	buildReactionExpression,
 	collectObservableBindings,
 	ensureImports,
 	getMemberKey,
+	getSobxImportLocalNames,
 	transformSobx,
 } from "./transform.js";
 export { AssignmentExpressionTransformer } from "./transformers/assignment-expression.js";
