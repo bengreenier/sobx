@@ -18,7 +18,7 @@ function compile(source: string): string {
 }
 
 function loadFixture(name: string, kind: "input" | "output" = "input"): string {
-	const ext = kind === "input" ? "input.ts" : "output.ts";
+	const ext = kind === "input" ? "input.ts" : "output.js";
 	const filePath = path.join(FIXTURES_DIR, `${name}.${ext}`);
 	return readFileSync(filePath, "utf-8");
 }
@@ -79,5 +79,19 @@ describe("transformSobx", () => {
 		const expected = loadFixture("mobx-sync-effect", "output");
 		const output = compile(input);
 		expect(output.trim()).toBe(expected.trim());
+	});
+
+	it("does not transform when importing from mobx (only sobx is compiled)", () => {
+		const input = `import { observable, reaction } from "mobx";
+const store = observable({ count: 0 });
+reaction(() => store.count, (n) => console.log(n));`;
+		const output = compile(input);
+		// Should be unchanged: no ProxyLike, no .get/.set, reaction() not compiled
+		expect(output).toContain('from "mobx"');
+		expect(output).not.toContain("ProxyLike");
+		expect(output).not.toContain('store.get("count")');
+		expect(output).not.toContain("addObserver");
+		expect(output).toMatch(/observable\s*\(\s*\{\s*count:\s*0\s*\}/);
+		expect(output).toMatch(/reaction\s*\(\s*\(\)\s*=>\s*store\.count/);
 	});
 });

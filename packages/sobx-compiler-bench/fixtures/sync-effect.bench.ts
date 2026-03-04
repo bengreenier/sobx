@@ -11,6 +11,6 @@ reaction(
 );
 for (let i = 0; i < iterations; i++) {
 	runInAction(() => {
-		state.value = "v" + i;
+		state.value = `v${i}`;
 	});
 }

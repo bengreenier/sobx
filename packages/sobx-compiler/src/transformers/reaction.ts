@@ -1,28 +1,29 @@
 import { parse } from "@babel/parser";
-import type { CallExpression } from "@babel/types";
 import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
 import {
 	buildReactionExpression,
 	collectObservableBindings,
+	getSobxImportLocalNames,
 } from "../transform.js";
 
 /**
- * Custom transformer (unplugin-ast style): compiles reaction(dataFn, effectFn) to addObserver + effect.
+ * Custom transformer (unplugin-ast style): compiles reaction(dataFn, effectFn) to addObserver + effect
+ * only when reaction is imported from "sobx".
  * Needs full file code to resolve observable bindings.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
-export function ReactionTransformer(): Transformer<CallExpression> {
+export function ReactionTransformer() {
 	return {
-		onNode(node): node is CallExpression {
+		onNode(node: t.Node): node is t.CallExpression {
 			return (
-				node.type === "CallExpression" &&
+				t.isCallExpression(node) &&
 				t.isIdentifier(node.callee) &&
 				node.callee.name === "reaction"
 			);
 		},
 
-		transform(node, code, _context) {
+		transform(node: t.CallExpression, code: string, _context: { id: string }) {
 			const dataFn = node.arguments[0];
 			const effectFn = node.arguments[1];
 			if (
@@ -37,8 +38,17 @@ export function ReactionTransformer(): Transformer<CallExpression> {
 				sourceType: "module",
 				plugins: ["typescript", "jsx"],
 			});
+			const { reaction: sobxReactionNames } = getSobxImportLocalNames(
+				ast.program,
+			);
+			if (
+				!t.isIdentifier(node.callee) ||
+				!sobxReactionNames.has(node.callee.name)
+			)
+				return undefined;
 			const observableIds = collectObservableBindings(ast.program);
 			return buildReactionExpression(dataFn, effectFn, observableIds);
 		},
-	};
+		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; we use babel 7, cast required
+	} as Transformer<any>;
 }

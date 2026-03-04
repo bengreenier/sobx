@@ -1,5 +1,4 @@
 import { parse } from "@babel/parser";
-import type { AssignmentExpression } from "@babel/types";
 import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
 import { collectObservableBindings, getMemberKey } from "../transform.js";
@@ -8,18 +7,22 @@ import { collectObservableBindings, getMemberKey } from "../transform.js";
  * Custom transformer (unplugin-ast style): replaces obj.key = value with obj.set('key', value) when obj is an observable.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
-export function AssignmentExpressionTransformer(): Transformer<AssignmentExpression> {
+export function AssignmentExpressionTransformer() {
 	return {
-		onNode(node): node is AssignmentExpression {
+		onNode(node: t.Node): node is t.AssignmentExpression {
 			return (
-				node.type === "AssignmentExpression" &&
+				t.isAssignmentExpression(node) &&
 				node.operator === "=" &&
 				t.isMemberExpression(node.left) &&
 				t.isIdentifier(node.left.object)
 			);
 		},
 
-		transform(node, code, _context) {
+		transform(
+			node: t.AssignmentExpression,
+			code: string,
+			_context: { id: string },
+		) {
 			const left = node.left;
 			if (!t.isMemberExpression(left) || !t.isIdentifier(left.object))
 				return undefined;
@@ -38,5 +41,6 @@ export function AssignmentExpressionTransformer(): Transformer<AssignmentExpress
 				[key, node.right],
 			);
 		},
-	};
+		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; we use babel 7, cast required
+	} as Transformer<any>;
 }

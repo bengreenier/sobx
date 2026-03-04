@@ -1,3 +1,4 @@
+import type { NodePath } from "@babel/traverse";
 import traverse from "@babel/traverse";
 import * as t from "@babel/types";
 
@@ -6,18 +7,64 @@ const PROXY_LIKE = "ProxyLike";
 const OBSERVABLE_CALLEE = "observable";
 const REACTION_CALLEE = "reaction";
 
+/** Module specifier we treat as sobx (only transform when imported from here). */
+const SOBX_SOURCE = "sobx";
+
+export interface SobxImportLocalNames {
+	observable: Set<string>;
+	reaction: Set<string>;
+}
+
 /**
- * Collect all binding names that are assigned a value from `observable(...)`.
+ * Collect local names that are bound to `observable` or `reaction` from an import of "sobx".
+ * Handles named imports and aliases (e.g. `import { observable as o } from "sobx"` → o in observable set).
+ */
+export function getSobxImportLocalNames(
+	program: t.Program,
+): SobxImportLocalNames {
+	const observable = new Set<string>();
+	const reaction = new Set<string>();
+
+	for (const stmt of program.body) {
+		if (!t.isImportDeclaration(stmt)) continue;
+		const source = stmt.source;
+		if (!t.isStringLiteral(source) || source.value !== SOBX_SOURCE) continue;
+
+		for (const spec of stmt.specifiers) {
+			if (!t.isImportSpecifier(spec)) continue;
+			const importedName = t.isIdentifier(spec.imported)
+				? spec.imported.name
+				: t.isStringLiteral(spec.imported)
+					? spec.imported.value
+					: null;
+			if (importedName == null) continue;
+			const local = spec.local.name;
+			if (importedName === OBSERVABLE_CALLEE) observable.add(local);
+			if (importedName === REACTION_CALLEE) reaction.add(local);
+		}
+	}
+
+	return { observable, reaction };
+}
+
+/**
+ * Collect all binding names that are assigned a value from `observable(...)` when that call
+ * refers to `observable` imported from "sobx".
  * Only handles simple patterns: `const x = observable(...)`, `let x = observable(...)`, `x = observable(...)`.
  */
 export function collectObservableBindings(program: t.Program): Set<string> {
+	const { observable: sobxObservableNames } = getSobxImportLocalNames(program);
 	const observableIds = new Set<string>();
 
 	traverse(program, {
 		noScope: true,
-		CallExpression(path) {
+		CallExpression(path: NodePath<t.CallExpression>) {
 			const callee = path.node.callee;
-			if (!t.isIdentifier(callee) || callee.name !== OBSERVABLE_CALLEE) {
+			if (
+				!t.isIdentifier(callee) ||
+				callee.name !== OBSERVABLE_CALLEE ||
+				!sobxObservableNames.has(callee.name)
+			) {
 				return;
 			}
 
@@ -66,6 +113,7 @@ export function transformSobx(program: t.Program): {
 	needsProxyLike: boolean;
 	needsReaction: boolean;
 } {
+	const sobxNames = getSobxImportLocalNames(program);
 	const observableIds = collectObservableBindings(program);
 	let needsProxyLike = false;
 	let needsReaction = false;
@@ -78,10 +126,10 @@ export function transformSobx(program: t.Program): {
 		CallExpression(path) {
 			const { node } = path;
 
-			// observable(source) -> new ProxyLike(source)
+			// observable(source) -> new ProxyLike(source) only when from sobx
 			if (
 				t.isIdentifier(node.callee) &&
-				node.callee.name === OBSERVABLE_CALLEE
+				sobxNames.observable.has(node.callee.name)
 			) {
 				needsProxyLike = true;
 				const arg = node.arguments[0];
@@ -90,8 +138,11 @@ export function transformSobx(program: t.Program): {
 				return;
 			}
 
-			// reaction(dataFn, effectFn) -> compiled reaction
-			if (t.isIdentifier(node.callee) && node.callee.name === REACTION_CALLEE) {
+			// reaction(dataFn, effectFn) -> compiled reaction only when from sobx
+			if (
+				t.isIdentifier(node.callee) &&
+				sobxNames.reaction.has(node.callee.name)
+			) {
 				const dataFn = node.arguments[0];
 				const effectFn = node.arguments[1];
 				if (
@@ -159,15 +210,18 @@ export function transformSobx(program: t.Program): {
 	// First pass: observable, member, assignment; noScope to avoid scope bugs when visiting reaction() args
 	traverse(ast, {
 		noScope: true,
-		CallExpression(path) {
+		CallExpression(path: NodePath<t.CallExpression>) {
 			const { node } = path;
-			if (t.isIdentifier(node.callee) && node.callee.name === REACTION_CALLEE) {
+			if (
+				t.isIdentifier(node.callee) &&
+				sobxNames.reaction.has(node.callee.name)
+			) {
 				path.skip();
 				return;
 			}
 			if (
 				t.isIdentifier(node.callee) &&
-				node.callee.name === OBSERVABLE_CALLEE
+				sobxNames.observable.has(node.callee.name)
 			) {
 				needsProxyLike = true;
 				const arg = node.arguments[0];
@@ -183,6 +237,7 @@ export function transformSobx(program: t.Program): {
 	// Second pass: replace reaction() in place via manual walk (avoids Babel scope on replacement tree)
 	replaceReactionCallsInPlace(
 		ast,
+		sobxNames.reaction,
 		() => {
 			needsReaction = true;
 		},
@@ -199,11 +254,13 @@ export function transformSobx(program: t.Program): {
 }
 
 /**
- * Walk the program and replace every reaction(dataFn, effectFn) call with the built IIFE.
+ * Walk the program and replace every reaction(dataFn, effectFn) call with the built IIFE
+ * when the callee is a reference to reaction imported from "sobx".
  * Does not use Babel traverse, so no scope is built for the replacement tree.
  */
 function replaceReactionCallsInPlace(
 	program: t.Program,
+	reactionLocalNames: Set<string>,
 	onReaction: () => void,
 	buildReplacement: (
 		dataFn: t.Expression,
@@ -218,7 +275,7 @@ function replaceReactionCallsInPlace(
 		if (
 			t.isCallExpression(node) &&
 			t.isIdentifier(node.callee) &&
-			node.callee.name === REACTION_CALLEE
+			reactionLocalNames.has(node.callee.name)
 		) {
 			const dataFn = node.arguments[0];
 			const effectFn = node.arguments[1];
@@ -229,7 +286,7 @@ function replaceReactionCallsInPlace(
 				t.isExpression(effectFn)
 			) {
 				onReaction();
-				(parent as Record<string, unknown>)[key] = buildReplacement(
+				(parent as unknown as Record<string, unknown>)[key] = buildReplacement(
 					dataFn,
 					effectFn,
 				);
@@ -239,7 +296,7 @@ function replaceReactionCallsInPlace(
 		const keys = t.VISITOR_KEYS[node.type];
 		if (!keys) return;
 		for (const k of keys) {
-			const val = (node as Record<string, unknown>)[k];
+			const val = (node as unknown as Record<string, unknown>)[k];
 			if (Array.isArray(val)) {
 				for (let i = 0; i < val.length; i++) {
 					const child = val[i];
@@ -247,12 +304,13 @@ function replaceReactionCallsInPlace(
 						walk(child as t.Node, val, i);
 				}
 			} else if (val && typeof val === "object" && "type" in val) {
-				walk(val as t.Node, node as Record<string, unknown>, k);
+				walk(val as t.Node, node as unknown as Record<string, unknown>, k);
 			}
 		}
 	}
 	for (let i = 0; i < program.body.length; i++) {
-		walk(program.body[i], program.body, i);
+		const stmt = program.body[i];
+		if (stmt !== undefined) walk(stmt, program.body, i);
 	}
 }
 
@@ -289,7 +347,7 @@ function collectReactionReads(
 		const keys = t.VISITOR_KEYS[node.type];
 		if (!keys) return;
 		for (const key of keys) {
-			const val = (node as Record<string, unknown>)[key];
+			const val = (node as unknown as Record<string, unknown>)[key];
 			if (Array.isArray(val)) {
 				for (const child of val) {
 					if (child && typeof child === "object" && "type" in child)
@@ -338,7 +396,7 @@ export function transformObservableMemberReads(
 	const keys = t.VISITOR_KEYS[cloned.type];
 	if (!keys) return cloned;
 	for (const key of keys) {
-		const val = (cloned as Record<string, unknown>)[key];
+		const val = (cloned as unknown as Record<string, unknown>)[key];
 		if (Array.isArray(val)) {
 			for (let i = 0; i < val.length; i++) {
 				const child = val[i];
@@ -352,12 +410,13 @@ export function transformObservableMemberReads(
 				}
 			}
 		} else if (val && typeof val === "object" && "type" in val) {
-			(cloned as Record<string, unknown>)[key] = transformObservableMemberReads(
-				val as t.Node,
-				observableIds,
-				cloned as t.Node,
-				key,
-			);
+			(cloned as unknown as Record<string, unknown>)[key] =
+				transformObservableMemberReads(
+					val as t.Node,
+					observableIds,
+					cloned as t.Node,
+					key,
+				);
 		}
 	}
 	return cloned;

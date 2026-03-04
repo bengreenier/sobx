@@ -21,6 +21,6 @@ for (let i = 0; i < half; i++) {
 }
 for (let i = 0; i < half; i++) {
 	runInAction(() => {
-		store.name = "n" + i;
+		store.name = `n${i}`;
 	});
 }

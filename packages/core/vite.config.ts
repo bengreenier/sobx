@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	build: {
+		emptyOutDir: false, // preserve dist/types from tsc (build:types runs first)
 		lib: {
 			formats: ["es", "cjs"],
 			entry: "src/index.ts",

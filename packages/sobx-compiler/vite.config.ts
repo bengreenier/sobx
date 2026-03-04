@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
 	build: {
+		emptyOutDir: false, // preserve dist/types from tsc (build:types runs first)
 		lib: {
 			formats: ["es", "cjs"],
 			entry: {
@@ -16,7 +17,7 @@ export default defineConfig({
 				rspack: "src/rspack.ts",
 			},
 			fileName: (format, entryName) =>
-				entryName + (format === "es" ? ".js" : ".cjs"),
+				entryName + (format === "es" || format === "esm" ? ".js" : ".cjs"),
 		},
 		rollupOptions: {
 			external: [

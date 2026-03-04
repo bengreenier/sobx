@@ -1,6 +1,5 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import rspack from "@rspack/core";
 import { sobxCompiler } from "@sobx/compiler/rspack";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

@@ -1,5 +1,6 @@
-import { ProxyLike } from "@sobx/core";
+import { observable, reaction } from "sobx";
 // One store, multiple reactions (common MobX pattern)
+import { ProxyLike } from "@sobx/core";
 const store = new ProxyLike({
   count: 0,
   name: ""

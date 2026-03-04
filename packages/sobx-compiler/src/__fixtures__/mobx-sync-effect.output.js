@@ -1,5 +1,6 @@
-import { ProxyLike } from "@sobx/core";
+import { observable, reaction } from "sobx";
 // Reaction as "sync to external system" (e.g. localStorage, log) – MobX docs pattern
+import { ProxyLike } from "@sobx/core";
 const state = new ProxyLike({
   value: ""
 });

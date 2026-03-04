@@ -1,5 +1,6 @@
-import { ProxyLike } from "@sobx/core";
+import { observable, reaction } from "sobx";
 // Multiple features in one file: observable, reads, writes, reaction
+import { ProxyLike } from "@sobx/core";
 const store = new ProxyLike({
   count: 0,
   name: ""

@@ -42,7 +42,7 @@
 	},
 	"scripts": {
 		"build": "pnpm run build:types && pnpm run build:lib",
-		"build:types": "tsc --declaration --emitDeclarationOnly --outDir ./dist/types",
+		"build:types": "tsc -p tsconfig.lib.json",
 		"build:lib": "vite build",
 		"lint": "biome check .",
 		"test": "vitest --coverage"
@@ -85,8 +85,10 @@
 		}
 	},
 	"devDependencies": {
+		"@types/babel__traverse": "^7.18.0",
 		"esbuild": "^0.27.3",
 		"mobx": "^6.15.0",
+		"sobx": "workspace:*",
 		"rolldown": "^0.15.1",
 		"rollup": "^4.0.0",
 		"tsx": "^4.21.0",
