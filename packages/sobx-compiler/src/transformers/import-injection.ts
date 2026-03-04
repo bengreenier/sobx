@@ -26,7 +26,7 @@ export function ImportInjectionTransformer(): Transformer<Program> {
 				!code.includes('from "@sobx/core"') &&
 				!code.includes("from '@sobx/core'")
 			) {
-				s.appendLeft(0, SOBX_IMPORT + "\n");
+				s.appendLeft(0, `${SOBX_IMPORT}\n`);
 			}
 		},
 	};

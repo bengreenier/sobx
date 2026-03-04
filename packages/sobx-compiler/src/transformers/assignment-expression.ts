@@ -1,11 +1,8 @@
-import type { AssignmentExpression } from "@babel/types";
 import { parse } from "@babel/parser";
+import type { AssignmentExpression } from "@babel/types";
 import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
-import {
-	collectObservableBindings,
-	getMemberKey,
-} from "../transform.js";
+import { collectObservableBindings, getMemberKey } from "../transform.js";
 
 /**
  * Custom transformer (unplugin-ast style): replaces obj.key = value with obj.set('key', value) when obj is an observable.
@@ -38,7 +35,7 @@ export function AssignmentExpressionTransformer(): Transformer<AssignmentExpress
 
 			return t.callExpression(
 				t.memberExpression(left.object, t.identifier("set")),
-				[key, node.right]
+				[key, node.right],
 			);
 		},
 	};

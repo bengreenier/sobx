@@ -1,18 +1,15 @@
-import type { MemberExpression } from "@babel/types";
 import { parse } from "@babel/parser";
 import traverse from "@babel/traverse";
+import type { MemberExpression } from "@babel/types";
 import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
-import {
-	collectObservableBindings,
-	getMemberKey,
-} from "../transform.js";
+import { collectObservableBindings, getMemberKey } from "../transform.js";
 
 /** Return true if (start,end) is inside a reaction() call in the AST. */
 function isInsideReactionCall(
 	ast: t.Program,
 	start: number,
-	end: number
+	end: number,
 ): boolean {
 	let inside = false;
 	traverse(ast, {
@@ -45,10 +42,7 @@ export function MemberExpressionTransformer(): Transformer<MemberExpression> {
 		onNode(node, parent): node is MemberExpression {
 			if (node.type !== "MemberExpression") return false;
 			// Skip if this is the left-hand side of an assignment (handled by AssignmentExpressionTransformer)
-			if (
-				t.isAssignmentExpression(parent) &&
-				parent.left === node
-			) {
+			if (t.isAssignmentExpression(parent) && parent.left === node) {
 				return false;
 			}
 			return t.isIdentifier(node.object);
@@ -76,7 +70,7 @@ export function MemberExpressionTransformer(): Transformer<MemberExpression> {
 
 			return t.callExpression(
 				t.memberExpression(node.object, t.identifier("get")),
-				[key]
+				[key],
 			);
 		},
 	};

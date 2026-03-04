@@ -1,5 +1,5 @@
-import { defineConfig } from "rolldown";
 import { sobxCompiler } from "@sobx/compiler/rolldown";
+import { defineConfig } from "rolldown";
 
 export default defineConfig({
 	input: "src/index.ts",

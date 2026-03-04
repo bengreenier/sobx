@@ -1,10 +1,10 @@
-import type { CallExpression } from "@babel/types";
 import { parse } from "@babel/parser";
+import type { CallExpression } from "@babel/types";
 import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
 import {
-	collectObservableBindings,
 	buildReactionExpression,
+	collectObservableBindings,
 } from "../transform.js";
 
 /**

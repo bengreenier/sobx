@@ -17,10 +17,7 @@ export function collectObservableBindings(program: t.Program): Set<string> {
 		noScope: true,
 		CallExpression(path) {
 			const callee = path.node.callee;
-			if (
-				!t.isIdentifier(callee) ||
-				callee.name !== OBSERVABLE_CALLEE
-			) {
+			if (!t.isIdentifier(callee) || callee.name !== OBSERVABLE_CALLEE) {
 				return;
 			}
 
@@ -50,7 +47,7 @@ export function collectObservableBindings(program: t.Program): Set<string> {
  * Get the property key for a MemberExpression: identifier name or computed expression.
  */
 export function getMemberKey(
-	property: t.MemberExpression["property"]
+	property: t.MemberExpression["property"],
 ): t.Expression | null {
 	if (t.isIdentifier(property)) {
 		return t.stringLiteral(property.name);
@@ -89,17 +86,12 @@ export function transformSobx(program: t.Program): {
 				needsProxyLike = true;
 				const arg = node.arguments[0];
 				if (!arg || !t.isExpression(arg)) return;
-				path.replaceWith(
-					t.newExpression(t.identifier(PROXY_LIKE), [arg])
-				);
+				path.replaceWith(t.newExpression(t.identifier(PROXY_LIKE), [arg]));
 				return;
 			}
 
 			// reaction(dataFn, effectFn) -> compiled reaction
-			if (
-				t.isIdentifier(node.callee) &&
-				node.callee.name === REACTION_CALLEE
-			) {
+			if (t.isIdentifier(node.callee) && node.callee.name === REACTION_CALLEE) {
 				const dataFn = node.arguments[0];
 				const effectFn = node.arguments[1];
 				if (
@@ -112,7 +104,7 @@ export function transformSobx(program: t.Program): {
 				}
 				needsReaction = true;
 				path.replaceWith(
-					buildReactionExpression(dataFn, effectFn, observableIds)
+					buildReactionExpression(dataFn, effectFn, observableIds),
 				);
 			}
 		},
@@ -137,10 +129,9 @@ export function transformSobx(program: t.Program): {
 
 			// obj.key -> obj.get('key')
 			path.replaceWith(
-				t.callExpression(
-					t.memberExpression(node.object, t.identifier("get")),
-					[key]
-				)
+				t.callExpression(t.memberExpression(node.object, t.identifier("get")), [
+					key,
+				]),
 			);
 		},
 
@@ -157,10 +148,10 @@ export function transformSobx(program: t.Program): {
 
 			// obj.key = value -> obj.set('key', value)
 			path.replaceWith(
-				t.callExpression(
-					t.memberExpression(left.object, t.identifier("set")),
-					[key, node.right]
-				)
+				t.callExpression(t.memberExpression(left.object, t.identifier("set")), [
+					key,
+					node.right,
+				]),
 			);
 		},
 	};
@@ -170,10 +161,7 @@ export function transformSobx(program: t.Program): {
 		noScope: true,
 		CallExpression(path) {
 			const { node } = path;
-			if (
-				t.isIdentifier(node.callee) &&
-				node.callee.name === REACTION_CALLEE
-			) {
+			if (t.isIdentifier(node.callee) && node.callee.name === REACTION_CALLEE) {
 				path.skip();
 				return;
 			}
@@ -184,9 +172,7 @@ export function transformSobx(program: t.Program): {
 				needsProxyLike = true;
 				const arg = node.arguments[0];
 				if (!arg || !t.isExpression(arg)) return;
-				path.replaceWith(
-					t.newExpression(t.identifier(PROXY_LIKE), [arg])
-				);
+				path.replaceWith(t.newExpression(t.identifier(PROXY_LIKE), [arg]));
 				return;
 			}
 		},
@@ -195,10 +181,13 @@ export function transformSobx(program: t.Program): {
 	});
 
 	// Second pass: replace reaction() in place via manual walk (avoids Babel scope on replacement tree)
-	replaceReactionCallsInPlace(ast, () => {
-		needsReaction = true;
-	}, (dataFn, effectFn) =>
-		buildReactionExpression(dataFn, effectFn, observableIds)
+	replaceReactionCallsInPlace(
+		ast,
+		() => {
+			needsReaction = true;
+		},
+		(dataFn, effectFn) =>
+			buildReactionExpression(dataFn, effectFn, observableIds),
 	);
 
 	const finalAst = ensureImports(ast, {
@@ -218,13 +207,13 @@ function replaceReactionCallsInPlace(
 	onReaction: () => void,
 	buildReplacement: (
 		dataFn: t.Expression,
-		effectFn: t.Expression
-	) => t.Expression
+		effectFn: t.Expression,
+	) => t.Expression,
 ): void {
 	function walk(
 		node: t.Node,
 		parent: Record<string, unknown> | t.Node[],
-		key: string | number
+		key: string | number,
 	): void {
 		if (
 			t.isCallExpression(node) &&
@@ -242,7 +231,7 @@ function replaceReactionCallsInPlace(
 				onReaction();
 				(parent as Record<string, unknown>)[key] = buildReplacement(
 					dataFn,
-					effectFn
+					effectFn,
 				);
 				return;
 			}
@@ -273,7 +262,7 @@ function replaceReactionCallsInPlace(
  */
 function collectReactionReads(
 	dataFn: t.Expression,
-	observableIds: Set<string>
+	observableIds: Set<string>,
 ): { obj: string; key: string }[] {
 	const reads: { obj: string; key: string }[] = [];
 
@@ -306,11 +295,7 @@ function collectReactionReads(
 					if (child && typeof child === "object" && "type" in child)
 						walk(child as t.Node);
 				}
-			} else if (
-				val &&
-				typeof val === "object" &&
-				"type" in val
-			) {
+			} else if (val && typeof val === "object" && "type" in val) {
 				walk(val as t.Node);
 			}
 		}
@@ -329,19 +314,24 @@ export function transformObservableMemberReads(
 	node: t.Node,
 	observableIds: Set<string>,
 	parent?: t.Node,
-	parentKey?: string
+	parentKey?: string,
 ): t.Node {
 	if (
 		t.isMemberExpression(node) &&
 		t.isIdentifier(node.object) &&
 		observableIds.has(node.object.name) &&
-		!(parent && t.isAssignmentExpression(parent) && parentKey === "left" && parent.left === node)
+		!(
+			parent &&
+			t.isAssignmentExpression(parent) &&
+			parentKey === "left" &&
+			parent.left === node
+		)
 	) {
 		const key = getMemberKey(node.property);
 		if (!key) return t.cloneNode(node);
 		return t.callExpression(
 			t.memberExpression(t.identifier(node.object.name), t.identifier("get")),
-			[key]
+			[key],
 		);
 	}
 	const cloned = t.cloneNode(node);
@@ -357,7 +347,7 @@ export function transformObservableMemberReads(
 						child as t.Node,
 						observableIds,
 						cloned as t.Node,
-						key
+						key,
 					) as t.Node & { type: string };
 				}
 			}
@@ -366,7 +356,7 @@ export function transformObservableMemberReads(
 				val as t.Node,
 				observableIds,
 				cloned as t.Node,
-				key
+				key,
 			);
 		}
 	}
@@ -381,18 +371,18 @@ export function transformObservableMemberReads(
 export function buildReactionExpression(
 	dataFn: t.Expression,
 	effectFn: t.Expression,
-	observableIds: Set<string>
+	observableIds: Set<string>,
 ): t.Expression {
 	const reads = collectReactionReads(dataFn, observableIds);
 	// Clone and transform member reads to .get() so the replacement is self-contained
 	// (avoids magic-string "Cannot split a chunk that has already been edited")
 	const dataFnClone = transformObservableMemberReads(
 		dataFn,
-		observableIds
+		observableIds,
 	) as t.Expression;
 	const effectFnClone = transformObservableMemberReads(
 		effectFn,
-		observableIds
+		observableIds,
 	) as t.Expression;
 
 	if (reads.length === 0) {
@@ -404,10 +394,7 @@ export function buildReactionExpression(
 	const disposersId = t.identifier("__d");
 	const statements: t.Statement[] = [
 		t.variableDeclaration("const", [
-			t.variableDeclarator(
-				disposersId,
-				t.arrayExpression([])
-			),
+			t.variableDeclarator(disposersId, t.arrayExpression([])),
 		]),
 	];
 
@@ -419,32 +406,26 @@ export function buildReactionExpression(
 			[
 				keyLit,
 				t.arrowFunctionExpression(
-					[
-						t.identifier("_k"),
-						t.identifier("_prev"),
-						t.identifier("curr"),
-					],
-					t.callExpression(effectFnClone, [t.identifier("curr")])
+					[t.identifier("_k"), t.identifier("_prev"), t.identifier("curr")],
+					t.callExpression(effectFnClone, [t.identifier("curr")]),
 				),
-			]
+			],
 		);
 		statements.push(
 			t.expressionStatement(
 				t.callExpression(
 					t.memberExpression(disposersId, t.identifier("push")),
-					[addObserverCall]
-				)
-			)
+					[addObserverCall],
+				),
+			),
 		);
 	}
 
 	// Run effect once with initial value: effect(dataFn())
 	statements.push(
 		t.expressionStatement(
-			t.callExpression(effectFnClone, [
-				t.callExpression(dataFnClone, []),
-			])
-		)
+			t.callExpression(effectFnClone, [t.callExpression(dataFnClone, [])]),
+		),
 	);
 
 	// Return disposer
@@ -460,21 +441,24 @@ export function buildReactionExpression(
 								t.arrowFunctionExpression(
 									[t.identifier("x")],
 									t.callExpression(
-										t.memberExpression(t.identifier("x"), t.identifier("dispose")),
-										[]
-									)
+										t.memberExpression(
+											t.identifier("x"),
+											t.identifier("dispose"),
+										),
+										[],
+									),
 								),
-							]
-						)
+							],
+						),
 					),
-				])
-			)
-		)
+				]),
+			),
+		),
 	);
 
 	return t.callExpression(
 		t.arrowFunctionExpression([], t.blockStatement(statements)),
-		[]
+		[],
 	);
 }
 
@@ -483,12 +467,12 @@ export function buildReactionExpression(
  */
 export function ensureImports(
 	program: t.Program,
-	opts: { proxyLike: boolean; reaction: boolean }
+	opts: { proxyLike: boolean; reaction: boolean },
 ): t.Program {
 	const specifiers: t.ImportSpecifier[] = [];
 	if (opts.proxyLike) {
 		specifiers.push(
-			t.importSpecifier(t.identifier(PROXY_LIKE), t.identifier(PROXY_LIKE))
+			t.importSpecifier(t.identifier(PROXY_LIKE), t.identifier(PROXY_LIKE)),
 		);
 	}
 	if (opts.reaction) {
@@ -500,7 +484,7 @@ export function ensureImports(
 
 	const importDecl = t.importDeclaration(
 		specifiers,
-		t.stringLiteral(SOBX_CORE)
+		t.stringLiteral(SOBX_CORE),
 	);
 
 	const body = [...program.body];

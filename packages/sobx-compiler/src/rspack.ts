@@ -1,10 +1,9 @@
 import AST from "unplugin-ast/rspack";
-import {
-	createSobxCompiler,
-	type SobxCompilerOptions,
-} from "./core.js";
+import { createSobxCompiler, type SobxCompilerOptions } from "./core.js";
 
-const compiler = createSobxCompiler(AST as import("./core.js").ASTPluginFactory);
+const compiler = createSobxCompiler(
+	AST as import("./core.js").ASTPluginFactory,
+);
 
 /** Rspack plugin instance (avoids hard dependency on rspack types). */
 export type RspackPlugin = { apply: (compiler: unknown) => void };

@@ -12,11 +12,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { parse } from "@babel/parser";
 import generate from "@babel/generator";
-import { ProxyLike } from "@sobx/core";
-import { configure, runInAction, observable, reaction } from "mobx";
+import { parse } from "@babel/parser";
 import { transformSobx } from "@sobx/compiler";
+import { ProxyLike } from "@sobx/core";
+import { configure, observable, reaction, runInAction } from "mobx";
 
 configure({ enforceActions: "always" });
 
@@ -69,10 +69,7 @@ function compileToSobx(source: string): string {
 
 /** Remove ESM import of mobx so we can run in vm with globals in context. */
 function stripMobxImport(code: string): string {
-	return code.replace(
-		/import\s*\{[^}]*\}\s*from\s*["']mobx["'];?\s*\n?/g,
-		"",
-	);
+	return code.replace(/import\s*\{[^}]*\}\s*from\s*["']mobx["'];?\s*\n?/g, "");
 }
 
 /** Remove TypeScript declare for iterations (vm runs JS, not TS). */
@@ -92,7 +89,9 @@ function stripSobxImport(code: string): string {
 }
 
 function runMobX(basename: string, iterations: number): number {
-	const source = stripDeclareIterations(stripMobxImport(loadBenchSource(basename)));
+	const source = stripDeclareIterations(
+		stripMobxImport(loadBenchSource(basename)),
+	);
 	const context = {
 		observable,
 		reaction,

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "@babel/parser";
 import generate from "@babel/generator";
+import { parse } from "@babel/parser";
 import { transformSobx } from "./transform.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,14 +31,14 @@ describe("transformSobx", () => {
 		expect(output.trim()).toBe(expected.trim());
 	});
 
-	it("property-read: compiles state.count to state.get(\"count\")", () => {
+	it('property-read: compiles state.count to state.get("count")', () => {
 		const input = loadFixture("property-read");
 		const expected = loadFixture("property-read", "output");
 		const output = compile(input);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
-	it("property-write: compiles state.count = 1 to state.set(\"count\", 1)", () => {
+	it('property-write: compiles state.count = 1 to state.set("count", 1)', () => {
 		const input = loadFixture("property-write");
 		const expected = loadFixture("property-write", "output");
 		const output = compile(input);

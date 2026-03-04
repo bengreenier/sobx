@@ -1,5 +1,5 @@
-import { parse } from "@babel/parser";
 import generate from "@babel/generator";
+import { parse } from "@babel/parser";
 import { transformSobx } from "./transform.js";
 
 /**
@@ -20,7 +20,9 @@ function tryParse(source: string): ReturnType<typeof parse> | null {
  * Full compile pipeline: parse -> transform -> generate.
  * Used to assert the transform never throws on valid input.
  */
-function compileNoThrow(source: string): { ok: true; code: string } | { ok: false; error: unknown } {
+function compileNoThrow(
+	source: string,
+): { ok: true; code: string } | { ok: false; error: unknown } {
 	const ast = tryParse(source);
 	if (!ast) return { ok: false, error: new Error("Parse failed") };
 	try {
@@ -59,7 +61,7 @@ describe("transformSobx fuzz", () => {
 				switch (Math.floor(Math.random() * 4)) {
 					case 0:
 						tailStmts.push(
-							`reaction(() => ${obsId}.${key}, (v) => console.log(v));`
+							`reaction(() => ${obsId}.${key}, (v) => console.log(v));`,
 						);
 						break;
 					case 1:
@@ -70,24 +72,26 @@ describe("transformSobx fuzz", () => {
 						break;
 					default:
 						tailStmts.push(
-							`reaction(() => ${obsId}.${key}, (val) => console.log(val));`
+							`reaction(() => ${obsId}.${key}, (val) => console.log(val));`,
 						);
 				}
 			}
-			const source = tailStmts.length ? `${head}\n${tailStmts.join("\n")}` : head;
+			const source = tailStmts.length
+				? `${head}\n${tailStmts.join("\n")}`
+				: head;
 			const result = compileNoThrow(source);
 			if (result.ok) {
 				const reparse = tryParse(result.code);
 				if (!reparse) {
 					throw new Error(
-						`Generated code did not parse:\n---\n${result.code}\n---`
+						`Generated code did not parse:\n---\n${result.code}\n---`,
 					);
 				}
 			} else {
 				const err = result.error as Error;
 				if (err?.message !== "Parse failed") {
 					throw new Error(
-						`Transform threw on input:\n---\n${source}\n---\n${err}`
+						`Transform threw on input:\n---\n${source}\n---\n${err}`,
 					);
 				}
 			}
@@ -103,7 +107,7 @@ describe("transformSobx fuzz", () => {
 			const result = compileNoThrow(source);
 			if (!result.ok) {
 				throw new Error(
-					`Transform threw on input:\n---\n${source}\n---\n${result.error}`
+					`Transform threw on input:\n---\n${source}\n---\n${result.error}`,
 				);
 			}
 		}
@@ -118,7 +122,7 @@ describe("transformSobx fuzz", () => {
 			const result = compileNoThrow(source);
 			if (!result.ok) {
 				throw new Error(
-					`Transform threw on input:\n---\n${source}\n---\n${result.error}`
+					`Transform threw on input:\n---\n${source}\n---\n${result.error}`,
 				);
 			}
 		}

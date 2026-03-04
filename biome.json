@@ -6,7 +6,8 @@
 		"useIgnoreFile": false
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": false,
+		"includes": ["**", "!**/dist", "!**/coverage", "!**/__fixtures__"]
 	},
 	"formatter": {
 		"enabled": true,

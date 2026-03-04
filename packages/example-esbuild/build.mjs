@@ -1,5 +1,5 @@
-import * as esbuild from "esbuild";
 import { sobxCompiler } from "@sobx/compiler/esbuild";
+import * as esbuild from "esbuild";
 
 await esbuild.build({
 	entryPoints: ["src/index.ts"],

@@ -1,11 +1,10 @@
 import type { Plugin } from "rolldown";
 import AST from "unplugin-ast/rolldown";
-import {
-	createSobxCompiler,
-	type SobxCompilerOptions,
-} from "./core.js";
+import { createSobxCompiler, type SobxCompilerOptions } from "./core.js";
 
-const compiler = createSobxCompiler(AST as import("./core.js").ASTPluginFactory);
+const compiler = createSobxCompiler(
+	AST as import("./core.js").ASTPluginFactory,
+);
 
 /**
  * Rolldown / tsdown plugin. Use: plugins: [sobxCompiler()].

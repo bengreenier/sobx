@@ -1,8 +1,8 @@
-import { ObservableTransformer } from "./transformers/observable.js";
-import { ReactionTransformer } from "./transformers/reaction.js";
-import { MemberExpressionTransformer } from "./transformers/member-expression.js";
 import { AssignmentExpressionTransformer } from "./transformers/assignment-expression.js";
 import { ImportInjectionTransformer } from "./transformers/import-injection.js";
+import { MemberExpressionTransformer } from "./transformers/member-expression.js";
+import { ObservableTransformer } from "./transformers/observable.js";
+import { ReactionTransformer } from "./transformers/reaction.js";
 
 export interface SobxCompilerOptions {
 	/**

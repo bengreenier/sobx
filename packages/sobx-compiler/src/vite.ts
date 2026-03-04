@@ -1,11 +1,10 @@
-import type { Plugin } from "vite";
 import AST from "unplugin-ast/vite";
-import {
-	createSobxCompiler,
-	type SobxCompilerOptions,
-} from "./core.js";
+import type { Plugin } from "vite";
+import { createSobxCompiler, type SobxCompilerOptions } from "./core.js";
 
-const compiler = createSobxCompiler(AST as import("./core.js").ASTPluginFactory);
+const compiler = createSobxCompiler(
+	AST as import("./core.js").ASTPluginFactory,
+);
 
 /**
  * Vite plugin. Use: plugins: [sobxCompiler()].
