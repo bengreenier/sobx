@@ -1,0 +1,8 @@
+{
+	"recommendations": [
+		"biomejs.biome",
+		"fill-labs.dependi",
+		"vitest.explorer",
+		"redhat.vscode-yaml"
+	]
+}

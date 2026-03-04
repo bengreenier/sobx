@@ -1,0 +1,26 @@
+{
+	"name": "@sobx/compiler",
+	"version": "0.0.1-alpha.1",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/types/index.d.ts",
+			"import": "./dist/index.js",
+			"require": "./dist/index.cjs"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "pnpm run build:types && pnpm run build:lib",
+		"build:types": "tsc --declaration --emitDeclarationOnly --outDir ./dist/types",
+		"build:lib": "vite build",
+		"lint": "biome check .",
+		"test": "vitest --coverage"
+	},
+	"dependencies": {
+		"@sobx/core": "workspace:*",
+		"unplugin": "^3.0.0",
+		"unplugin-ast": "^0.16.0"
+	},
+	"devDependencies": {}
+}
