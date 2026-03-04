@@ -2,6 +2,18 @@
 	"name": "@sobx/core",
 	"version": "0.0.1-alpha.1",
 	"type": "module",
+	"author": {
+		"name": "Ben Greenier",
+		"email": "ben+npm@bengreenier.com"
+	},
+	"licenses": [
+		{
+			"type": "MIT"
+		},
+		{
+			"type": "Apache-2.0"
+		}
+	],
 	"exports": {
 		".": {
 			"types": "./dist/types/index.d.ts",

@@ -3,6 +3,18 @@
 	"private": true,
 	"version": "0.0.0",
 	"type": "module",
+	"author": {
+		"name": "Ben Greenier",
+		"email": "ben+npm@bengreenier.com"
+	},
+	"licenses": [
+		{
+			"type": "MIT"
+		},
+		{
+			"type": "Apache-2.0"
+		}
+	],
 	"scripts": {
 		"build": "webpack"
 	},
