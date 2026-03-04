@@ -1,0 +1,19 @@
+{
+	"name": "@sobx/compiler-bench",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"bench": "NODE_ENV=production tsx scripts/bench.ts"
+	},
+	"dependencies": {
+		"@sobx/core": "workspace:*",
+		"@sobx/compiler": "workspace:*",
+		"@babel/generator": "^7.29.1",
+		"@babel/parser": "^7.29.0",
+		"mobx": "^6.15.0"
+	},
+	"devDependencies": {
+		"tsx": "^4.21.0"
+	}
+}

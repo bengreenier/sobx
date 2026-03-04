@@ -1,11 +1,11 @@
 /**
  * Benchmark: MobX vs sobx (compiled output using ProxyLike).
- * Runs each *.bench-input.ts in node:vm; each script sets up store/reactions and
+ * Runs each *.bench.ts in node:vm; each script sets up store/reactions and
  * runs a workload loop using the global `iterations` (injected by this runner).
  * We time full script execution.
  *
  * Run from repo root (build core and compiler first):
- *   pnpm --filter @sobx/core build && pnpm --filter @sobx/compiler build && pnpm --filter @sobx/compiler bench
+ *   pnpm --filter @sobx/core build && pnpm --filter @sobx/compiler build && pnpm --filter @sobx/compiler-bench bench
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -25,7 +25,7 @@ const ROUNDS = 5;
 const WARMUP = 1_000;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.join(__dirname, "..", "src", "__fixtures__");
+const FIXTURES_DIR = path.join(__dirname, "..", "fixtures");
 
 function now(): number {
 	return performance.now();
@@ -43,13 +43,13 @@ function median(arr: number[]): number {
 
 function listBenchInputs(): string[] {
 	return readdirSync(FIXTURES_DIR)
-		.filter((f) => f.endsWith(".bench-input.ts"))
-		.map((f) => f.replace(/\.bench-input\.ts$/, ""))
+		.filter((f) => f.endsWith(".bench.ts"))
+		.map((f) => f.replace(/\.bench\.ts$/, ""))
 		.sort();
 }
 
 function loadBenchSource(basename: string): string {
-	const p = path.join(FIXTURES_DIR, `${basename}.bench-input.ts`);
+	const p = path.join(FIXTURES_DIR, `${basename}.bench.ts`);
 	return readFileSync(p, "utf-8");
 }
 
@@ -126,7 +126,7 @@ function runSobx(basename: string, iterations: number): number {
 
 const benchNames = listBenchInputs();
 if (benchNames.length === 0) {
-	console.error("No *.bench-input.ts files found in", FIXTURES_DIR);
+	console.error("No *.bench.ts files found in", FIXTURES_DIR);
 	process.exit(1);
 }
 
@@ -139,7 +139,7 @@ for (const name of benchNames) {
 console.log(
 	"Benchmark: MobX vs sobx (ProxyLike), NODE_ENV=production, enforceActions: always\n",
 );
-console.log("  Each *.bench-input.ts runs in node:vm (setup + workload loop).\n");
+console.log("  Each *.bench.ts runs in node:vm (setup + workload loop).\n");
 console.log(`  iterations (global): ${ITERATIONS.toLocaleString()}`);
 console.log(`  Rounds per bench: ${ROUNDS} (median reported)\n`);
 

@@ -44,7 +44,6 @@
 		"build": "pnpm run build:types && pnpm run build:lib",
 		"build:types": "tsc --declaration --emitDeclarationOnly --outDir ./dist/types",
 		"build:lib": "vite build",
-		"bench": "NODE_ENV=production tsx scripts/bench.ts",
 		"lint": "biome check .",
 		"test": "vitest --coverage"
 	},
