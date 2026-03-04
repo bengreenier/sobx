@@ -1,0 +1,19 @@
+{
+	"name": "example-rspack",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"build": "rspack build"
+	},
+	"dependencies": {
+		"@sobx/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@rspack/cli": "^1.7.7",
+		"@rspack/core": "^1.7.7",
+		"@sobx/compiler": "workspace:*",
+		"mobx": "^6.15.0",
+		"typescript": "^5.9.3"
+	}
+}

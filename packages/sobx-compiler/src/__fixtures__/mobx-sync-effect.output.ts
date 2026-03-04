@@ -6,7 +6,7 @@ const state = new ProxyLike({
 (() => {
   const __d = [];
   __d.push(state.addObserver("value", (_k, _prev, curr) => (value => console.log("synced:", value))(curr)));
-  (value => console.log("synced:", value))((() => state.value)());
+  (value => console.log("synced:", value))((() => state.get("value"))());
   return () => {
     __d.forEach(x => x.dispose());
   };

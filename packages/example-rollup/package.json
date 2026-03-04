@@ -1,0 +1,19 @@
+{
+	"name": "example-rollup",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"build": "rollup -c"
+	},
+	"dependencies": {
+		"@sobx/core": "workspace:*"
+	},
+	"devDependencies": {
+		"@rollup/plugin-typescript": "^11.1.6",
+		"@sobx/compiler": "workspace:*",
+		"mobx": "^6.15.0",
+		"rollup": "^4.0.0",
+		"typescript": "^5.9.3"
+	}
+}

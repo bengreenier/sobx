@@ -15,6 +15,9 @@ export interface SobxCompilerOptions {
 	exclude?: string | RegExp | (string | RegExp)[];
 }
 
+// Reaction before MemberExpression so we replace reaction() as a whole first; the reaction
+// replacement is self-contained (buildReactionExpression uses transformObservableMemberReads
+// so inner store.count -> store.get("count")), avoiding magic-string "already been edited" errors.
 const SOBX_TRANSFORMERS = [
 	ObservableTransformer(),
 	ReactionTransformer(),

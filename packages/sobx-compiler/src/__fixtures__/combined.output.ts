@@ -10,7 +10,7 @@ function increment() {
 (() => {
   const __d = [];
   __d.push(store.addObserver("name", (_k, _prev, curr) => (name => console.log("name:", name))(curr)));
-  (name => console.log("name:", name))((() => store.name)());
+  (name => console.log("name:", name))((() => store.get("name"))());
   return () => {
     __d.forEach(x => x.dispose());
   };

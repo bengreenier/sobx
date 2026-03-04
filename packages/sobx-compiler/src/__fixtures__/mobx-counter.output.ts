@@ -6,7 +6,7 @@ const counter = new ProxyLike({
 (() => {
   const __d = [];
   __d.push(counter.addObserver("count", (_k, _prev, curr) => (n => console.log(n))(curr)));
-  (n => console.log(n))((() => counter.count)());
+  (n => console.log(n))((() => counter.get("count"))());
   return () => {
     __d.forEach(x => x.dispose());
   };

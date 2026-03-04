@@ -321,6 +321,59 @@ function collectReactionReads(
 }
 
 /**
+ * Replace observable member reads (obj.key) with obj.get('key') in an expression tree.
+ * Used so reaction() replacement is self-contained and does not rely on MemberExpressionTransformer
+ * running on its output (which would cause magic-string "already been edited" errors).
+ */
+export function transformObservableMemberReads(
+	node: t.Node,
+	observableIds: Set<string>,
+	parent?: t.Node,
+	parentKey?: string
+): t.Node {
+	if (
+		t.isMemberExpression(node) &&
+		t.isIdentifier(node.object) &&
+		observableIds.has(node.object.name) &&
+		!(parent && t.isAssignmentExpression(parent) && parentKey === "left" && parent.left === node)
+	) {
+		const key = getMemberKey(node.property);
+		if (!key) return t.cloneNode(node);
+		return t.callExpression(
+			t.memberExpression(t.identifier(node.object.name), t.identifier("get")),
+			[key]
+		);
+	}
+	const cloned = t.cloneNode(node);
+	const keys = t.VISITOR_KEYS[cloned.type];
+	if (!keys) return cloned;
+	for (const key of keys) {
+		const val = (cloned as Record<string, unknown>)[key];
+		if (Array.isArray(val)) {
+			for (let i = 0; i < val.length; i++) {
+				const child = val[i];
+				if (child && typeof child === "object" && "type" in child) {
+					(val as t.Node[])[i] = transformObservableMemberReads(
+						child as t.Node,
+						observableIds,
+						cloned as t.Node,
+						key
+					) as t.Node & { type: string };
+				}
+			}
+		} else if (val && typeof val === "object" && "type" in val) {
+			(cloned as Record<string, unknown>)[key] = transformObservableMemberReads(
+				val as t.Node,
+				observableIds,
+				cloned as t.Node,
+				key
+			);
+		}
+	}
+	return cloned;
+}
+
+/**
  * Build the reaction runtime call.
  * reaction(() => data, (data) => effect) -> compiled to addObserver + initial effect run.
  * Exported for use by ReactionTransformer.
@@ -331,9 +384,16 @@ export function buildReactionExpression(
 	observableIds: Set<string>
 ): t.Expression {
 	const reads = collectReactionReads(dataFn, observableIds);
-	// Clone so the new tree doesn't share nodes with the replaced subtree (avoids scope bugs)
-	const dataFnClone = t.cloneNode(dataFn);
-	const effectFnClone = t.cloneNode(effectFn);
+	// Clone and transform member reads to .get() so the replacement is self-contained
+	// (avoids magic-string "Cannot split a chunk that has already been edited")
+	const dataFnClone = transformObservableMemberReads(
+		dataFn,
+		observableIds
+	) as t.Expression;
+	const effectFnClone = transformObservableMemberReads(
+		effectFn,
+		observableIds
+	) as t.Expression;
 
 	if (reads.length === 0) {
 		// Can't statically determine reads; use runtime reaction helper that will track
