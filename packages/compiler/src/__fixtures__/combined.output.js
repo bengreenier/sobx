@@ -1,18 +1,13 @@
-import { observable, reaction } from "sobx";
-// One store, multiple reactions (common MobX pattern)
+import { observable, reaction } from "mobx";
+// Multiple features in one file: observable, reads, writes, reaction
 import { ProxyLike } from "@sobx/core";
 const store = new ProxyLike({
   count: 0,
   name: ""
 });
-(() => {
-  const __d = [];
-  __d.push(store.addObserver("count", (_k, _prev, curr) => (n => console.log("count:", n))(curr)));
-  (n => console.log("count:", n))((() => store.get("count"))());
-  return () => {
-    __d.forEach(x => x.dispose());
-  };
-})();
+function increment() {
+  store.set("count", store.get("count") + 1);
+}
 (() => {
   const __d = [];
   __d.push(store.addObserver("name", (_k, _prev, curr) => (name => console.log("name:", name))(curr)));

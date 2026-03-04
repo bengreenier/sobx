@@ -1,4 +1,4 @@
-import { observable, reaction } from "sobx";
+import { observable, reaction } from "mobx";
 // MobX-style: reaction() should become addObserver + initial effect
 import { ProxyLike } from "@sobx/core";
 const state = new ProxyLike({

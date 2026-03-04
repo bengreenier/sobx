@@ -2,7 +2,7 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-Virtual MobX-compatible API for use with the sobx compiler. **Do not call these at runtime**—they throw. The [@sobx/compiler](https://github.com/sobx/sobx/tree/main/packages/sobx-compiler) rewrites your code so that `observable`, `reaction`, and `runInAction` are replaced with compiled output.
+Virtual MobX-compatible API for use with the sobx compiler. **Do not call these at runtime**—they throw. The [@sobx/compiler](https://github.com/sobx/sobx/tree/main/packages/compiler) rewrites your code so that `observable`, `reaction`, and `runInAction` are replaced with compiled output.
 
 Use this package when migrating from MobX: keep the same API surface and switch your imports from `"mobx"` to `"sobx"`, then add the compiler to your build.
 
@@ -23,7 +23,7 @@ If any of these are ever executed without being compiled, they throw with a mess
 ## Usage
 
 1. Import from `"sobx"` instead of `"mobx"`.
-2. Add the sobx compiler to your bundler (Vite, Rollup, Webpack, esbuild, Rolldown, or Rspack). See `packages/sobx-compiler` in this repo.
+2. Add the sobx compiler to your bundler (Vite, Rollup, Webpack, esbuild, Rolldown, or Rspack). See `packages/compiler` in this repo.
 
 ```ts
 import { observable, reaction, runInAction } from "sobx";
@@ -43,7 +43,7 @@ runInAction(() => {
 
 ## Benchmarks
 
-Runtime comparison (MobX vs sobx compiled with `@sobx/core` ProxyLike), same workload in `node:vm`, 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via `packages/sobx-compiler-bench` (`pnpm bench`).
+Runtime comparison (MobX vs sobx compiled with `@sobx/core` ProxyLike), same workload in `node:vm`, 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via `packages/compiler-bench` (`pnpm bench`).
 
 | Fixture                      | MobX (ms) | sobx (ms) | sobx vs MobX   |
 |-----------------------------|-----------|-----------|----------------|
@@ -53,6 +53,3 @@ Runtime comparison (MobX vs sobx compiled with `@sobx/core` ProxyLike), same wor
 | observable-writes-only      | 138.13    | 52.75     | **161.8% faster** |
 | sync-effect                 | 294.76    | 81.37     | **262.3% faster** |
 
-## Version
-
-0.0.1-alpha.1

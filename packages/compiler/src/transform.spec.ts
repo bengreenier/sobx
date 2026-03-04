@@ -24,39 +24,41 @@ function loadFixture(name: string, kind: "input" | "output" = "input"): string {
 	return readFileSync(filePath, "utf-8");
 }
 
+const FIXTURE_OPTIONS = { moduleSpecifier: "mobx" };
+
 describe("transformSobx", () => {
 	it("observable: compiles observable() to new ProxyLike() and adds import", () => {
 		const input = loadFixture("observable");
 		const expected = loadFixture("observable", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it('property-read: compiles state.count to state.get("count")', () => {
 		const input = loadFixture("property-read");
 		const expected = loadFixture("property-read", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it('property-write: compiles state.count = 1 to state.set("count", 1)', () => {
 		const input = loadFixture("property-write");
 		const expected = loadFixture("property-write", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it("reaction: compiles reaction() to addObserver + initial effect", () => {
 		const input = loadFixture("reaction");
 		const expected = loadFixture("reaction", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it("combined: observable + reads + writes + reaction in one file", () => {
 		const input = loadFixture("combined");
 		const expected = loadFixture("combined", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
@@ -64,21 +66,21 @@ describe("transformSobx", () => {
 	it("mobx-counter: observable + reaction + increment", () => {
 		const input = loadFixture("mobx-counter");
 		const expected = loadFixture("mobx-counter", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it("mobx-multiple-reactions: one store, multiple reactions", () => {
 		const input = loadFixture("mobx-multiple-reactions");
 		const expected = loadFixture("mobx-multiple-reactions", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 
 	it("mobx-sync-effect: reaction as sync to external system", () => {
 		const input = loadFixture("mobx-sync-effect");
 		const expected = loadFixture("mobx-sync-effect", "output");
-		const output = compile(input);
+		const output = compile(input, FIXTURE_OPTIONS);
 		expect(output.trim()).toBe(expected.trim());
 	});
 

@@ -44,6 +44,3 @@ proxy.set("count", 1); // logs: count: 0 -> 1
 console.log(proxy.get("count")); // 1
 ```
 
-## Version
-
-0.0.1-alpha.1

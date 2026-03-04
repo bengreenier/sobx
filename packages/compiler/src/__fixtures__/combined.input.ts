@@ -1,4 +1,4 @@
-import { observable, reaction } from "sobx";
+import { observable, reaction } from "mobx";
 // Multiple features in one file: observable, reads, writes, reaction
 const store = observable({ count: 0, name: "" });
 

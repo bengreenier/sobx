@@ -106,6 +106,7 @@ For custom pipelines you can use the transform and transformer APIs:
 
 See type definitions in the package for details.
 
-## Version
+## Development
 
-0.0.1-alpha.1
+The transform fixtures in `src/__fixtures__` import from `"mobx"` (and tests pass `moduleSpecifier: "mobx"`) to avoid a circular dependency on the `sobx` package.
+

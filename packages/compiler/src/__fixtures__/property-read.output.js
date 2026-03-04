@@ -1,4 +1,4 @@
-import { observable } from "sobx";
+import { observable } from "mobx";
 // MobX-style: state.count should become state.get("count")
 import { ProxyLike } from "@sobx/core";
 const state = new ProxyLike({

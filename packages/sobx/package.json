@@ -30,6 +30,6 @@
 	},
 	"dependencies": {},
 	"peerDependencies": {
-		"@sobx/compiler": "0.0.1-alpha.1"
+		"@sobx/compiler": "workspace:*"
 	}
 }
