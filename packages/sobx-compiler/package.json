@@ -14,13 +14,21 @@
 		"build": "pnpm run build:types && pnpm run build:lib",
 		"build:types": "tsc --declaration --emitDeclarationOnly --outDir ./dist/types",
 		"build:lib": "vite build",
+		"bench": "NODE_ENV=production tsx scripts/bench.ts",
 		"lint": "biome check .",
 		"test": "vitest --coverage"
 	},
 	"dependencies": {
 		"@sobx/core": "workspace:*",
+		"@babel/generator": "^7.29.1",
+		"@babel/parser": "^7.29.0",
+		"@babel/traverse": "^7.29.0",
+		"@babel/types": "^7.29.0",
 		"unplugin": "^3.0.0",
 		"unplugin-ast": "^0.16.0"
 	},
-	"devDependencies": {}
+	"devDependencies": {
+		"mobx": "^6.15.0",
+		"tsx": "^4.21.0"
+	}
 }
