@@ -1,97 +1,158 @@
 /**
  * Benchmark: MobX vs sobx (compiled output using ProxyLike).
- * Same workload for both: one observable store, one reaction, many write cycles.
+ * Runs each *.bench-input.ts in node:vm; each script sets up store/reactions and
+ * runs a workload loop using the global `iterations` (injected by this runner).
+ * We time full script execution.
  *
- * Run from repo root after building core: pnpm --filter @sobx/core build && pnpm --filter @sobx/compiler bench
+ * Run from repo root (build core and compiler first):
+ *   pnpm --filter @sobx/core build && pnpm --filter @sobx/compiler build && pnpm --filter @sobx/compiler bench
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
+import { parse } from "@babel/parser";
+import generate from "@babel/generator";
 import { ProxyLike } from "@sobx/core";
 import { configure, runInAction, observable, reaction } from "mobx";
+import { transformSobx } from "@sobx/compiler";
 
 configure({ enforceActions: "always" });
 
 const ITERATIONS = 500_000;
 const ROUNDS = 5;
+const WARMUP = 1_000;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = path.join(__dirname, "..", "src", "__fixtures__");
 
 function now(): number {
 	return performance.now();
 }
 
-function runMobX(iterations: number): number {
-	const state = observable({ count: 0 });
-	let runs = 0;
-	const dispose = reaction(
-		() => state.count,
-		() => {
-			runs += 1;
-		},
-	);
-	const start = now();
-	for (let i = 0; i < iterations; i++) {
-		runInAction(() => {
-			state.count += 1;
-		});
-	}
-	const end = now();
-	dispose();
-	return end - start;
-}
-
-function runSobx(iterations: number): number {
-	const state = new ProxyLike({ count: 0 });
-	let runs = 0;
-	const disposers: { dispose: () => void }[] = [];
-	disposers.push(
-		state.addObserver("count", (_k, _prev, curr) => {
-			runs += 1;
-		}),
-	);
-	// Initial effect run (like compiled reaction)
-	runs += 1;
-	const start = now();
-	for (let i = 0; i < iterations; i++) {
-		state.set("count", state.get("count") + 1);
-	}
-	const end = now();
-	disposers.forEach((d) => d.dispose());
-	return end - start;
-}
-
 function median(arr: number[]): number {
 	const sorted = [...arr].sort((a, b) => a - b);
 	const mid = Math.floor(sorted.length / 2);
-	return sorted.length % 2 !== 0
-		? sorted[mid]!
-		: (sorted[mid - 1]! + sorted[mid]!) / 2;
+	const a = sorted[mid];
+	const b = sorted[mid - 1];
+	if (a === undefined) return 0;
+	if (sorted.length % 2 !== 0) return a;
+	return b !== undefined ? (a + b) / 2 : a;
 }
 
-// Warm up
-runMobX(1_000);
-runSobx(1_000);
-
-const mobxTimes: number[] = [];
-const sobxTimes: number[] = [];
-
-for (let r = 0; r < ROUNDS; r++) {
-	mobxTimes.push(runMobX(ITERATIONS));
-	sobxTimes.push(runSobx(ITERATIONS));
+function listBenchInputs(): string[] {
+	return readdirSync(FIXTURES_DIR)
+		.filter((f) => f.endsWith(".bench-input.ts"))
+		.map((f) => f.replace(/\.bench-input\.ts$/, ""))
+		.sort();
 }
 
-const mobxMed = median(mobxTimes);
-const sobxMed = median(sobxTimes);
-const mobxOps = (ITERATIONS / mobxMed) * 1000;
-const sobxOps = (ITERATIONS / sobxMed) * 1000;
+function loadBenchSource(basename: string): string {
+	const p = path.join(FIXTURES_DIR, `${basename}.bench-input.ts`);
+	return readFileSync(p, "utf-8");
+}
 
-console.log("Benchmark: observable + reaction, then N writes (reaction fires each time)\n");
-console.log(`  Iterations per run: ${ITERATIONS.toLocaleString()}`);
-console.log(`  Rounds: ${ROUNDS} (median reported)\n`);
-console.log("  MobX:");
-console.log(`    Median: ${mobxMed.toFixed(2)} ms`);
-console.log(`    ~${mobxOps.toLocaleString("en-US", { maximumFractionDigits: 0 })} writes/s\n`);
-console.log("  sobx (ProxyLike):");
-console.log(`    Median: ${sobxMed.toFixed(2)} ms`);
-console.log(`    ~${sobxOps.toLocaleString("en-US", { maximumFractionDigits: 0 })} writes/s\n`);
-const ratio = sobxMed / mobxMed;
-const winner = ratio < 1 ? "sobx" : "MobX";
-const pct = (Math.max(ratio, 1 / ratio) - 1) * 100;
-console.log(`  ${winner} was ${pct.toFixed(1)}% faster in this run.\n`);
+function compileToSobx(source: string): string {
+	const ast = parse(source, {
+		sourceType: "module",
+		plugins: ["typescript"],
+	});
+	const { ast: transformed } = transformSobx(ast.program);
+	const gen =
+		"default" in generate &&
+		typeof (generate as { default: unknown }).default === "function"
+			? (generate as { default: (ast: unknown) => { code: string } }).default
+			: generate;
+	return gen(transformed).code;
+}
+
+/** Remove ESM import of mobx so we can run in vm with globals in context. */
+function stripMobxImport(code: string): string {
+	return code.replace(
+		/import\s*\{[^}]*\}\s*from\s*["']mobx["'];?\s*\n?/g,
+		"",
+	);
+}
+
+/** Remove ESM import of @sobx/core so we can run in vm with ProxyLike in context. */
+function stripSobxImport(code: string): string {
+	return code.replace(
+		/import\s*\{[^}]*\}\s*from\s*["']@sobx\/core["'];?\s*\n?/g,
+		"",
+	);
+}
+
+function runMobX(basename: string, iterations: number): number {
+	const source = stripMobxImport(loadBenchSource(basename));
+	const context = {
+		observable,
+		reaction,
+		runInAction,
+		console: { log: () => {} },
+		iterations,
+		Math: globalThis.Math,
+	};
+	const start = now();
+	vm.runInNewContext(source, context);
+	return now() - start;
+}
+
+function runSobx(basename: string, iterations: number): number {
+	const source = loadBenchSource(basename);
+	const compiled = compileToSobx(source);
+	const code = stripSobxImport(stripMobxImport(compiled));
+	const context = {
+		ProxyLike,
+		runInAction: (fn: () => void) => fn(),
+		console: { log: () => {} },
+		iterations,
+		Math: globalThis.Math,
+	};
+	const start = now();
+	vm.runInNewContext(code, context);
+	return now() - start;
+}
+
+const benchNames = listBenchInputs();
+if (benchNames.length === 0) {
+	console.error("No *.bench-input.ts files found in", FIXTURES_DIR);
+	process.exit(1);
+}
+
+// Warm up each bench once
+for (const name of benchNames) {
+	runMobX(name, WARMUP);
+	runSobx(name, WARMUP);
+}
+
+console.log(
+	"Benchmark: MobX vs sobx (ProxyLike), NODE_ENV=production, enforceActions: always\n",
+);
+console.log("  Each *.bench-input.ts runs in node:vm (setup + workload loop).\n");
+console.log(`  iterations (global): ${ITERATIONS.toLocaleString()}`);
+console.log(`  Rounds per bench: ${ROUNDS} (median reported)\n`);
+
+for (const name of benchNames) {
+	const mobxTimes: number[] = [];
+	const sobxTimes: number[] = [];
+	for (let r = 0; r < ROUNDS; r++) {
+		mobxTimes.push(runMobX(name, ITERATIONS));
+		sobxTimes.push(runSobx(name, ITERATIONS));
+	}
+	const mobxMed = median(mobxTimes);
+	const sobxMed = median(sobxTimes);
+	const mobxOps = (ITERATIONS / mobxMed) * 1000;
+	const sobxOps = (ITERATIONS / sobxMed) * 1000;
+	const ratio = sobxMed / mobxMed;
+	const winner = ratio < 1 ? "sobx" : "MobX";
+	const pct = (Math.max(ratio, 1 / ratio) - 1) * 100;
+	console.log(`  [${name}]`);
+	console.log(
+		`    MobX:  ${mobxMed.toFixed(2)} ms  ~${mobxOps.toLocaleString("en-US", { maximumFractionDigits: 0 })} ops/s`,
+	);
+	console.log(
+		`    sobx:  ${sobxMed.toFixed(2)} ms  ~${sobxOps.toLocaleString("en-US", { maximumFractionDigits: 0 })} ops/s`,
+	);
+	console.log(`    ${winner} ${pct.toFixed(1)}% faster\n`);
+}
