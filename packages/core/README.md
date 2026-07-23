@@ -17,9 +17,9 @@ pnpm add @sobx/core
 Wraps a plain object and notifies observers when properties change. Use `.get(key)` and `.set(key, value)` instead of direct property access.
 
 - **`constructor(target: T)`** — Wrap an object.
-- **`get(key)`** — Read a property.
-- **`set(key, value)`** — Write a property and notify observers.
-- **`addObserver(observer)`** — Observe all keys. Callback: `(key, previous, current) => void`.
+- **`get(key)`** — Read a property. Plain nested objects are returned as cached `ProxyLike` wrappers (arrays and other non-plain objects are returned as-is).
+- **`set(key, value)`** — Write a property and notify observers. Nested wrappers for that key are invalidated.
+- **`addObserver(observer)`** — Observe all keys. Callback: `(key, previous, current) => void`. Nested mutations bubble to parent observers.
 - **`addObserver(key, observer)`** — Observe a single key.
 - **`dispose()`** — On the handle returned by `addObserver`, stops observing.
 

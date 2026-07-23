@@ -5,8 +5,11 @@ import * as t from "@babel/types";
 import type { Transformer } from "unplugin-ast";
 import { collectObservableBindings, getMemberKey } from "../transform.js";
 
-/** Return true if (start,end) is inside a reaction() call in the AST. */
-function isInsideReactionCall(
+/** Callees whose transformers rewrite the whole call (including body accesses). */
+const SELF_CONTAINED_CALLEES = new Set(["reaction", "runInAction"]);
+
+/** Return true if (start,end) is inside a reaction()/runInAction() call in the AST. */
+function isInsideSelfContainedCall(
 	program: t.Program,
 	start: number,
 	end: number,
@@ -18,7 +21,7 @@ function isInsideReactionCall(
 			const node = path.node;
 			if (
 				t.isIdentifier(node.callee) &&
-				node.callee.name === "reaction" &&
+				SELF_CONTAINED_CALLEES.has(node.callee.name) &&
 				node.start != null &&
 				node.end != null &&
 				start >= node.start &&
@@ -34,7 +37,7 @@ function isInsideReactionCall(
 
 /**
  * Custom transformer (unplugin-ast style): replaces obj.key with obj.get('key') when obj is an observable.
- * Skips member expressions inside reaction() so we don't overwrite a span already replaced by ReactionTransformer.
+ * Skips member expressions inside reaction()/runInAction() so we don't overwrite a span already replaced.
  * @see https://unplugin.unjs.io/showcase/unplugin-ast.html#custom-transformers
  */
 export function MemberExpressionTransformer(moduleSpecifier = "sobx") {
@@ -62,11 +65,10 @@ export function MemberExpressionTransformer(moduleSpecifier = "sobx") {
 				plugins: ["typescript", "jsx"],
 			});
 			const program = ast.program ?? ast;
-			// Skip if inside reaction() – ReactionTransformer replaces the whole call and uses transformObservableMemberReads
 			if (
 				node.start != null &&
 				node.end != null &&
-				isInsideReactionCall(program, node.start, node.end)
+				isInsideSelfContainedCall(program, node.start, node.end)
 			) {
 				return undefined;
 			}
@@ -81,6 +83,6 @@ export function MemberExpressionTransformer(moduleSpecifier = "sobx") {
 				[key],
 			);
 		},
-		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; we use babel 7, cast required
+		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; cast required
 	} as Transformer<any>;
 }

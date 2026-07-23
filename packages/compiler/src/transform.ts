@@ -6,12 +6,14 @@ const SOBX_CORE = "@sobx/core";
 const PROXY_LIKE = "ProxyLike";
 const OBSERVABLE_CALLEE = "observable";
 const REACTION_CALLEE = "reaction";
+const RUN_IN_ACTION_CALLEE = "runInAction";
 
 const DEFAULT_MODULE_SPECIFIER = "sobx";
 
 export interface SobxImportLocalNames {
 	observable: Set<string>;
 	reaction: Set<string>;
+	runInAction: Set<string>;
 }
 
 export interface TransformSobxOptions {
@@ -20,7 +22,7 @@ export interface TransformSobxOptions {
 }
 
 /**
- * Collect local names that are bound to `observable` or `reaction` from an import of the given source.
+ * Collect local names that are bound to `observable`, `reaction`, or `runInAction` from an import of the given source.
  * Handles named imports and aliases (e.g. `import { observable as o } from "sobx"` → o in observable set).
  */
 export function getSobxImportLocalNames(
@@ -29,6 +31,7 @@ export function getSobxImportLocalNames(
 ): SobxImportLocalNames {
 	const observable = new Set<string>();
 	const reaction = new Set<string>();
+	const runInAction = new Set<string>();
 
 	for (const stmt of program.body) {
 		if (!t.isImportDeclaration(stmt)) continue;
@@ -47,10 +50,11 @@ export function getSobxImportLocalNames(
 			const local = spec.local.name;
 			if (importedName === OBSERVABLE_CALLEE) observable.add(local);
 			if (importedName === REACTION_CALLEE) reaction.add(local);
+			if (importedName === RUN_IN_ACTION_CALLEE) runInAction.add(local);
 		}
 	}
 
-	return { observable, reaction };
+	return { observable, reaction, runInAction };
 }
 
 /**
@@ -154,6 +158,22 @@ export function transformSobx(
 				return;
 			}
 
+			// runInAction(fn) -> fn() only when from sobx (transform body accesses first)
+			if (
+				t.isIdentifier(node.callee) &&
+				sobxNames.runInAction.has(node.callee.name)
+			) {
+				const fn = node.arguments[0];
+				if (!fn || !t.isExpression(fn)) return;
+				path.replaceWith(
+					t.callExpression(
+						transformObservableMemberReads(fn, observableIds) as t.Expression,
+						[],
+					),
+				);
+				return;
+			}
+
 			// reaction(dataFn, effectFn) -> compiled reaction only when from sobx
 			if (
 				t.isIdentifier(node.callee) &&
@@ -243,6 +263,20 @@ export function transformSobx(
 				const arg = node.arguments[0];
 				if (!arg || !t.isExpression(arg)) return;
 				path.replaceWith(t.newExpression(t.identifier(PROXY_LIKE), [arg]));
+				return;
+			}
+			if (
+				t.isIdentifier(node.callee) &&
+				sobxNames.runInAction.has(node.callee.name)
+			) {
+				const fn = node.arguments[0];
+				if (!fn || !t.isExpression(fn)) return;
+				path.replaceWith(
+					t.callExpression(
+						transformObservableMemberReads(fn, observableIds) as t.Expression,
+						[],
+					),
+				);
 				return;
 			}
 		},
@@ -380,9 +414,11 @@ function collectReactionReads(
 }
 
 /**
- * Replace observable member reads (obj.key) with obj.get('key') in an expression tree.
- * Used so reaction() replacement is self-contained and does not rely on MemberExpressionTransformer
- * running on its output (which would cause magic-string "already been edited" errors).
+ * Replace observable member reads (obj.key → obj.get('key')) and writes
+ * (obj.key = value → obj.set('key', value)) in an expression/statement tree.
+ * Used so reaction() / runInAction() replacements are self-contained and do not
+ * rely on MemberExpressionTransformer / AssignmentExpressionTransformer running
+ * on their output (which would cause magic-string "already been edited" errors).
  */
 export function transformObservableMemberReads(
 	node: t.Node,
@@ -390,6 +426,29 @@ export function transformObservableMemberReads(
 	parent?: t.Node,
 	parentKey?: string,
 ): t.Node {
+	if (
+		t.isAssignmentExpression(node) &&
+		node.operator === "=" &&
+		t.isMemberExpression(node.left) &&
+		t.isIdentifier(node.left.object) &&
+		observableIds.has(node.left.object.name)
+	) {
+		const key = getMemberKey(node.left.property);
+		if (!key) return t.cloneNode(node);
+		const right = transformObservableMemberReads(
+			node.right,
+			observableIds,
+			node,
+			"right",
+		) as t.Expression;
+		return t.callExpression(
+			t.memberExpression(
+				t.identifier(node.left.object.name),
+				t.identifier("set"),
+			),
+			[key, right],
+		);
+	}
 	if (
 		t.isMemberExpression(node) &&
 		t.isIdentifier(node.object) &&

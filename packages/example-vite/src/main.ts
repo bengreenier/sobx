@@ -1,4 +1,4 @@
-import { observable, reaction } from "mobx";
+import { observable, reaction, runInAction } from "sobx";
 
 const store = observable({ count: 0 });
 reaction(
@@ -8,4 +8,6 @@ reaction(
 		document.getElementById("app")!.textContent = `Count: ${count}`;
 	},
 );
-store.count += 1;
+runInAction(() => {
+	store.count = store.count + 1;
+});

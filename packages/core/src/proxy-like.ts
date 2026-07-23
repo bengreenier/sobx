@@ -21,6 +21,18 @@ export interface ProxyLikeObserverHandle {
 	dispose(): void;
 }
 
+interface ProxyLikeParentRef {
+	proxy: ProxyLike<object>;
+	key: PropertyKey;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	if (v === null || typeof v !== "object") return false;
+	if (Array.isArray(v)) return false;
+	const proto = Object.getPrototypeOf(v);
+	return proto === Object.prototype || proto === null;
+}
+
 /**
  * Provides an observable proxy-like interface for an object.
  *
@@ -46,11 +58,14 @@ export class ProxyLike<T extends object> {
 	private readonly globalObservers: Set<ProxyLikeObserver<T>> = new Set();
 	private readonly scopedObservers: Map<keyof T, Set<ProxyLikeObserver<T>>> =
 		new Map();
+	private readonly nestedWrappers = new Map<keyof T, ProxyLike<object>>();
+	private readonly parentRef?: ProxyLikeParentRef;
 
 	protected readonly target: T;
 
-	constructor(target: T) {
+	constructor(target: T, parentRef?: ProxyLikeParentRef) {
 		this.target = target;
+		this.parentRef = parentRef;
 	}
 
 	/**
@@ -109,11 +124,27 @@ export class ProxyLike<T extends object> {
 	/**
 	 * Reads the current value of a property from the wrapped object.
 	 *
+	 * Plain nested objects are returned as cached {@link ProxyLike} wrappers so
+	 * mutations via nested `.set()` are observable.
+	 *
 	 * @param key - The property key to read.
 	 * @returns The current value of that property.
 	 */
 	get(key: keyof T) {
-		return this.target[key];
+		const value = this.target[key];
+		if (!isPlainObject(value)) {
+			return value;
+		}
+
+		let wrapper = this.nestedWrappers.get(key);
+		if (!wrapper) {
+			wrapper = new ProxyLike(value as object, {
+				proxy: this as unknown as ProxyLike<object>,
+				key,
+			}) as ProxyLike<object>;
+			this.nestedWrappers.set(key, wrapper);
+		}
+		return wrapper;
 	}
 
 	/**
@@ -125,13 +156,31 @@ export class ProxyLike<T extends object> {
 	 */
 	set<K extends keyof T>(key: K, value: T[K]): void {
 		const previous = this.target[key];
+		this.nestedWrappers.delete(key);
 		this.target[key] = value;
+		this.notifyObservers(key, previous, value);
+		this.bubbleToParent();
+	}
 
+	private notifyObservers<K extends keyof T>(
+		key: K,
+		previous: T[K],
+		current: T[K],
+	): void {
 		this.scopedObservers.get(key)?.forEach((observer) => {
-			observer(key, previous, value);
+			observer(key, previous, current);
 		});
 		this.globalObservers.forEach((observer) => {
-			observer(key, previous, value);
+			observer(key, previous, current);
 		});
+	}
+
+	private bubbleToParent(): void {
+		if (!this.parentRef) return;
+		const { proxy, key } = this.parentRef;
+		const parentKey = key as keyof typeof proxy.target;
+		const nestedValue = proxy.target[parentKey];
+		proxy.notifyObservers(parentKey, nestedValue, nestedValue);
+		proxy.bubbleToParent();
 	}
 }
