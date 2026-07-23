@@ -22,10 +22,10 @@
 		"@sobx/core": "workspace:*"
 	},
 	"devDependencies": {
-		"@rspack/cli": "^1.7.7",
-		"@rspack/core": "^1.7.7",
+		"@rspack/cli": "^2.1.5",
+		"@rspack/core": "^2.1.5",
 		"@sobx/compiler": "workspace:*",
-		"mobx": "^6.15.0",
-		"typescript": "^5.9.3"
+		"mobx": "^6.16.1",
+		"typescript": "^6.0.3"
 	}
 }

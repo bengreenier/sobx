@@ -14,7 +14,10 @@
 			"type": "Apache-2.0"
 		}
 	],
-	"files": ["dist", "README.md"],
+	"files": [
+		"dist",
+		"README.md"
+	],
 	"exports": {
 		".": {
 			"types": "./dist/types/index.d.ts",
