@@ -27,7 +27,7 @@ Each entry exports a `sobxCompiler(options?)` function. Only files that import f
 ### Options
 
 - **`include`** — Pattern(s) for files to transform. Default: `/\.[jt]sx?$/`
-- **`exclude`** — Pattern(s) to skip.
+- **`exclude`** — Pattern(s) to skip. Always merged with `/node_modules/` (parsing deps via Babel is very slow).
 - **`moduleSpecifier`** — Module to treat as sobx (only transform imports from here). Default: `"sobx"`
 
 ### Vite
