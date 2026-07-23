@@ -14,7 +14,10 @@
 			"type": "Apache-2.0"
 		}
 	],
-	"files": ["dist", "README.md"],
+	"files": [
+		"dist",
+		"README.md"
+	],
 	"exports": {
 		".": {
 			"types": "./dist/types/index.d.ts",
@@ -61,19 +64,19 @@
 		"test": "vitest --coverage"
 	},
 	"dependencies": {
+		"@babel/generator": "^8.0.0",
+		"@babel/parser": "^8.0.4",
+		"@babel/traverse": "^8.0.4",
+		"@babel/types": "^8.0.4",
 		"@sobx/core": "workspace:*",
-		"@babel/generator": "^7.29.1",
-		"@babel/parser": "^7.29.0",
-		"@babel/traverse": "^7.29.0",
-		"@babel/types": "^7.29.0",
-		"unplugin": "^3.0.0",
-		"unplugin-ast": "^0.16.0"
+		"unplugin": "^3.3.0",
+		"unplugin-ast": "^0.17.2"
 	},
 	"peerDependencies": {
+		"@rspack/core": "*",
 		"esbuild": "*",
 		"rolldown": "*",
 		"rollup": "*",
-		"@rspack/core": "*",
 		"vite": "*",
 		"webpack": "*"
 	},
@@ -98,13 +101,13 @@
 		}
 	},
 	"devDependencies": {
-		"@types/babel__traverse": "^7.18.0",
-		"esbuild": "^0.27.3",
-		"mobx": "^6.15.0",
-		"rolldown": "^0.15.1",
-		"rollup": "^4.0.0",
-		"tsx": "^4.21.0",
-		"webpack": "^5.0.0",
-		"@rspack/core": "^1.7.7"
+		"@rspack/core": "^2.1.5",
+		"esbuild": "^0.28.1",
+		"mobx": "^6.16.1",
+		"rolldown": "^1.2.0",
+		"rollup": "^4.62.2",
+		"tsx": "^4.23.1",
+		"vite": "^8.1.5",
+		"webpack": "^5.109.0"
 	}
 }

@@ -23,8 +23,8 @@
 	},
 	"devDependencies": {
 		"@sobx/compiler": "workspace:*",
-		"esbuild": "^0.27.3",
-		"mobx": "^6.15.0",
-		"typescript": "^5.9.3"
+		"esbuild": "^0.28.1",
+		"mobx": "^6.16.1",
+		"typescript": "^6.0.3"
 	}
 }
