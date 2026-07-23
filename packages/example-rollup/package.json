@@ -19,12 +19,12 @@
 		"build": "rollup -c"
 	},
 	"dependencies": {
-		"@sobx/core": "workspace:*"
+		"@sobx/core": "workspace:*",
+		"sobx": "workspace:*"
 	},
 	"devDependencies": {
 		"@rollup/plugin-typescript": "^12.3.0",
 		"@sobx/compiler": "workspace:*",
-		"mobx": "^6.16.1",
 		"rollup": "^4.62.2",
 		"typescript": "^6.0.3"
 	}

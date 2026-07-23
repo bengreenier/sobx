@@ -35,6 +35,6 @@ export function ImportInjectionTransformer() {
 				s.appendLeft(0, `${SOBX_IMPORT}\n`);
 			}
 		},
-		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; we use babel 7, cast required
+		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; cast required
 	} as Transformer<any>;
 }

@@ -4,6 +4,8 @@ Dual-licensed under **MIT** and **Apache-2.0**. See [LICENSE-MIT](./LICENSE-MIT)
 
 **Not production-ready.** These packages are in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release (version without the alpha suffix).
 
+Requires **Node.js ≥ 22.18** and **TypeScript 6.x** (TypeScript 7’s classic JS API is not compatible with this toolchain yet).
+
 Packages in this repo:
 
 | Package | Description |

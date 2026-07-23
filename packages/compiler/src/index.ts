@@ -14,3 +14,4 @@ export { ImportInjectionTransformer } from "./transformers/import-injection.js";
 export { MemberExpressionTransformer } from "./transformers/member-expression.js";
 export { ObservableTransformer } from "./transformers/observable.js";
 export { ReactionTransformer } from "./transformers/reaction.js";
+export { RunInActionTransformer } from "./transformers/run-in-action.js";

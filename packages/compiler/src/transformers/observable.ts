@@ -38,6 +38,6 @@ export function ObservableTransformer(moduleSpecifier = "sobx") {
 				return undefined;
 			return t.newExpression(t.identifier(PROXY_LIKE), [arg]);
 		},
-		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; we use babel 7, cast required
+		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast expects babel 8 Node; cast required
 	} as Transformer<any>;
 }

@@ -84,6 +84,13 @@ describe("transformSobx", () => {
 		expect(output.trim()).toBe(expected.trim());
 	});
 
+	it("runInAction: compiles runInAction(fn) to fn()", () => {
+		const input = loadFixture("run-in-action");
+		const expected = loadFixture("run-in-action", "output");
+		const output = compile(input, FIXTURE_OPTIONS);
+		expect(output.trim()).toBe(expected.trim());
+	});
+
 	it("does not transform when importing from mobx (only sobx is compiled)", () => {
 		const input = `import { observable, reaction } from "mobx";
 const store = observable({ count: 0 });

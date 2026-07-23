@@ -10,13 +10,56 @@ describe("ProxyLike", () => {
 			expect(proxy.get("b")).toBe("two");
 		});
 
-		it("get returns references to the same object (mutations visible)", () => {
+		it("get returns ProxyLike wrapper for plain nested objects", () => {
 			const target = { nested: { x: 0 } };
 			const proxy = new ProxyLike(target);
 
-			const nested = proxy.get("nested") as { x: number };
-			nested.x = 42;
-			expect(proxy.get("nested")).toEqual({ x: 42 });
+			const nested = proxy.get("nested");
+			expect(nested).toBeInstanceOf(ProxyLike);
+			nested.set("x", 42);
+			expect(proxy.get("nested").get("x")).toBe(42);
+		});
+
+		it("get returns the same ProxyLike instance for repeated nested reads", () => {
+			const proxy = new ProxyLike({ nested: { x: 0 } });
+
+			expect(proxy.get("nested")).toBe(proxy.get("nested"));
+		});
+
+		it("get returns primitives as-is", () => {
+			const proxy = new ProxyLike({ count: 1, label: "hi", flag: true });
+
+			expect(proxy.get("count")).toBe(1);
+			expect(proxy.get("label")).toBe("hi");
+			expect(proxy.get("flag")).toBe(true);
+		});
+	});
+
+	describe("nested observability", () => {
+		it("nested set notifies nested observers", () => {
+			const proxy = new ProxyLike({ nested: { x: 0 } });
+			const nested = proxy.get("nested");
+			const observer = vi.fn();
+
+			nested.addObserver("x", observer);
+			nested.set("x", 5);
+
+			expect(observer).toHaveBeenCalledWith("x", 0, 5);
+		});
+
+		it("nested set bubbles to parent global observers", () => {
+			const target = { nested: { x: 0 } };
+			const proxy = new ProxyLike(target);
+			const parentObserver = vi.fn();
+
+			proxy.addObserver(parentObserver);
+			proxy.get("nested").set("x", 7);
+
+			expect(parentObserver).toHaveBeenCalledWith(
+				"nested",
+				target.nested,
+				target.nested,
+			);
 		});
 	});
 

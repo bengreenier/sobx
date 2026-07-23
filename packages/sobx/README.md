@@ -18,6 +18,18 @@ The compiler runs at build time and only transforms files that import from the c
 
 So your source stays MobX-style (observable, reaction, direct property access), and the published bundle uses explicit get/set and observers instead of a heavy runtime.
 
+### Supported surface (alpha)
+
+Only these APIs are compiled today:
+
+- `observable(object)` — plain objects (nested plain objects become nested `ProxyLike`s at runtime)
+- `reaction(dataFn, effectFn)` — static property reads on known observables
+- `runInAction(fn)` — compiled to `fn()` (no batching / action runtime)
+
+**Not supported yet:** `autorun`, `computed`, `action`, `makeObservable`, collections (`observable.array` / `map` / `set`), React `observer`, compound assignment (`+=` etc. — use `store.count = store.count + 1`), and dynamic/aliased observable bindings the compiler cannot see statically.
+
+**Toolchain note:** Use TypeScript 6.x. TypeScript 7 is the native Go rewrite and drops the classic JS API many plugins still need.
+
 ## Install
 
 ```bash

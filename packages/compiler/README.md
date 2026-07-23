@@ -4,6 +4,8 @@
 
 Compiles sobx usage: rewrites `observable`, `reaction`, and `runInAction` imported from a configurable module (default `"sobx"`) into code that uses `@sobx/core`. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack.
 
+Only files that import from the configured module are transformed. Writes must use `=` (not `+=` / other compound operators). Observable bindings are collected statically (`const x = observable(...)`); dynamic aliases are not tracked.
+
 ## Install
 
 ```bash

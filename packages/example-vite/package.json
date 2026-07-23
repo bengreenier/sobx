@@ -20,11 +20,11 @@
 		"dev": "vite"
 	},
 	"dependencies": {
-		"@sobx/core": "workspace:*"
+		"@sobx/core": "workspace:*",
+		"sobx": "workspace:*"
 	},
 	"devDependencies": {
 		"@sobx/compiler": "workspace:*",
-		"mobx": "^6.16.1",
 		"typescript": "^6.0.3",
 		"vite": "^8.1.5"
 	}

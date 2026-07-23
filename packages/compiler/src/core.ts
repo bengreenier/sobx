@@ -3,6 +3,7 @@ import { ImportInjectionTransformer } from "./transformers/import-injection.js";
 import { MemberExpressionTransformer } from "./transformers/member-expression.js";
 import { ObservableTransformer } from "./transformers/observable.js";
 import { ReactionTransformer } from "./transformers/reaction.js";
+import { RunInActionTransformer } from "./transformers/run-in-action.js";
 
 const DEFAULT_INCLUDE = /\.[jt]sx?$/;
 /** Skip dependency sources — Babel-parsing node_modules dominates bundler time. */
@@ -42,6 +43,7 @@ function mergeExclude(
 // so inner store.count -> store.get("count")), avoiding magic-string "already been edited" errors.
 function createTransformers(moduleSpecifier: string) {
 	return [
+		RunInActionTransformer(moduleSpecifier),
 		ObservableTransformer(moduleSpecifier),
 		ReactionTransformer(moduleSpecifier),
 		MemberExpressionTransformer(moduleSpecifier),
