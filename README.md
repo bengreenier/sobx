@@ -10,6 +10,7 @@ Packages in this repo:
 |---------|-------------|
 | [**@sobx/core**](./packages/core) | Observable proxy runtime (`ProxyLike`) |
 | [**sobx**](./packages/sobx) | Virtual MobX-compatible API (compile-time; use with the compiler) |
+| [**@sobx/ast**](./packages/ast) | IR of a program's MobX-style usages, and the analyzer that builds it |
 | [**@sobx/compiler**](./packages/compiler) | Compiler and bundler plugins (Vite, Rollup, Webpack, esbuild, Rolldown, Rspack) |
 | [example-esbuild](./packages/example-esbuild) | Example: sobx with esbuild |
 | [example-rolldown](./packages/example-rolldown) | Example: sobx with Rolldown |

@@ -1,0 +1,41 @@
+{
+	"name": "@sobx/ast",
+	"version": "0.0.1-alpha.1",
+	"type": "module",
+	"author": {
+		"name": "Ben Greenier",
+		"email": "ben+npm@bengreenier.com"
+	},
+	"licenses": [
+		{
+			"type": "MIT"
+		},
+		{
+			"type": "Apache-2.0"
+		}
+	],
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"exports": {
+		".": {
+			"types": "./dist/types/index.d.ts",
+			"import": "./dist/ast.js",
+			"require": "./dist/ast.cjs"
+		},
+		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"build": "pnpm run build:types && pnpm run build:lib",
+		"build:types": "tsc -p tsconfig.lib.json",
+		"build:lib": "vite build",
+		"lint": "biome check .",
+		"test": "vitest --coverage"
+	},
+	"dependencies": {
+		"@babel/parser": "^8.0.4",
+		"@babel/traverse": "^8.0.4",
+		"@babel/types": "^8.0.4"
+	}
+}
