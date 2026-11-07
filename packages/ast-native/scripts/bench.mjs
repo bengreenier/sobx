@@ -1,13 +1,14 @@
-// SPIKE benchmark: Babel analyzer (dist) vs the Rust analyzer (napi). Not part of the package.
+// Benchmark: the Babel analyzer (@sobx/ast dist) vs the Rust analyzer (napi addon).
+// Build both first: `pnpm --filter @sobx/ast build` and `pnpm --filter @sobx/ast-native build:native`.
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyze as babelAnalyze } from "../dist/ast.js";
+import { analyze as babelAnalyze } from "../../ast/dist/ast.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const native = createRequire(import.meta.url)(
-	path.join(here, "..", "..", "ast-native", "sobx-ast-native.node"),
+	path.join(here, "..", "sobx-ast-native.node"),
 );
 
 function median(fn, runs = 40, warmup = 8) {
@@ -38,7 +39,7 @@ function generate(stores) {
 
 const inputs = {
 	"analyze.ts (2.7k lines, little MobX)": readFileSync(
-		path.join(here, "..", "src", "analyze.ts"),
+		path.join(here, "..", "..", "ast", "src", "analyze.ts"),
 		"utf-8",
 	),
 	"generated (2k lines, all MobX)": generate(500),

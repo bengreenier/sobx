@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  js:
+    name: Lint, build, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm test
+
+  native:
+    # Builds the Rust analyzer and checks it against the Babel analyzer (full-IR parity on
+    # every spec input, plus a differential fuzz).
+    name: Native analyzer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/ast-native
+      - run: pnpm install --frozen-lockfile
+      - run: cargo clippy --release --all-targets -- -D warnings
+        working-directory: packages/ast-native
+      - run: pnpm --filter @sobx/ast-native build:native
+      - run: pnpm --filter @sobx/ast build
+      - name: Parity tests and differential fuzz
+        run: pnpm --filter @sobx/ast exec vitest run --project native
+        env:
+          SOBX_REQUIRE_NATIVE: "1"
+          SOBX_FUZZ_SEEDS: "3000"

@@ -1,6 +1,4 @@
 //! The sobx IR (mirrors `packages/ast/src/types.ts`). Serialized to JSON for JS consumers.
-//!
-//! SPIKE: only the parts produced by the ported slice are modeled.
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -35,10 +33,10 @@ pub struct Module {
     pub module_specifier: String,
     pub imports: Vec<Import>,
     pub observables: Vec<Observable>,
-    pub computeds: Vec<Value>,
+    pub computeds: Vec<Computed>,
     pub accesses: Vec<Access>,
     pub reactions: Vec<Reaction>,
-    pub actions: Vec<Value>,
+    pub actions: Vec<Action>,
     pub unsupported: Vec<UnsupportedUsage>,
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -48,20 +46,9 @@ pub struct Module {
 #[derive(Serialize)]
 #[serde(tag = "kind")]
 pub enum Import {
-    NamedImport {
-        imported: String,
-        local: String,
-        api: Option<&'static str>,
-        span: Span,
-    },
-    NamespaceImport {
-        local: String,
-        span: Span,
-    },
-    DefaultImport {
-        local: String,
-        span: Span,
-    },
+    NamedImport { imported: String, local: String, api: Option<&'static str>, span: Span },
+    NamespaceImport { local: String, span: Span },
+    DefaultImport { local: String, span: Span },
 }
 
 #[derive(Serialize, Clone)]
@@ -73,17 +60,23 @@ pub struct Binding {
     pub exported: bool,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[derive(Serialize, Clone, PartialEq)]
+#[serde(tag = "kind")]
 pub enum Annotation {
     #[serde(rename = "observable")]
     Observable { modifier: &'static str },
     #[serde(rename = "computed")]
     Computed { modifier: &'static str },
+    #[serde(rename = "action")]
+    Action { bound: bool },
     #[serde(rename = "autoAction")]
     AutoAction { bound: bool },
     #[serde(rename = "flow")]
     Flow { bound: bool },
+    #[serde(rename = "excluded")]
+    Excluded,
+    #[serde(rename = "unknown")]
+    Unknown,
 }
 
 #[derive(Serialize, Clone)]
@@ -103,7 +96,7 @@ pub struct Member {
 }
 
 #[derive(Serialize, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind")]
 pub enum Shape {
     #[serde(rename = "object")]
     Object { members: Vec<Member>, open: bool },
@@ -112,25 +105,55 @@ pub enum Shape {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "target")]
+pub enum Target {
+    #[serde(rename = "object")]
+    Object { binding: Option<Binding> },
+    #[serde(rename = "class", rename_all = "camelCase")]
+    Class { class_name: Option<String>, exported: bool, instances: Vec<Binding>, class_span: Span },
+}
+
+#[derive(Serialize)]
 pub struct Observable {
     pub kind: &'static str,
     pub id: String,
     pub source: &'static str,
-    pub target: &'static str,
-    pub binding: Option<Binding>,
+    #[serde(flatten)]
+    pub target: Target,
     pub shape: Shape,
     pub options: Option<Options>,
     pub span: Span,
 }
 
 #[derive(Serialize, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind")]
 pub enum Options {
     #[serde(rename = "object")]
     Object { entries: Map<String, Value>, open: bool },
     #[serde(rename = "unknown")]
     Unknown { span: Span },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum ComputedSource {
+    #[serde(rename = "call")]
+    Call { binding: Option<Binding> },
+    #[serde(rename = "getter")]
+    Getter { observable: String, key: String },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Computed {
+    pub kind: &'static str,
+    pub id: String,
+    pub source: ComputedSource,
+    pub body: FunctionRef,
+    pub options: Option<Options>,
+    pub dependencies: Vec<String>,
+    pub indirect_dependencies: Vec<String>,
+    pub span: Span,
 }
 
 #[derive(Serialize, Clone, PartialEq)]
@@ -149,6 +172,11 @@ pub enum Context {
     Tracked { by: String },
     TrackedNested { by: String },
     Effect { reaction: String },
+    Action { action: String },
+    AfterAwait {
+        #[serde(rename = "in")]
+        within: String,
+    },
 }
 
 #[derive(Serialize, Clone)]
@@ -184,49 +212,87 @@ pub enum Access {
         context: Context,
         span: Span,
     },
+    ComputedRead {
+        id: String,
+        computed: String,
+        context: Context,
+        span: Span,
+    },
 }
 
 impl Access {
     pub fn span(&self) -> Span {
         match self {
-            Access::Read { span, .. } | Access::Write { span, .. } | Access::Delete { span, .. } => {
-                *span
-            }
+            Access::Read { span, .. }
+            | Access::Write { span, .. }
+            | Access::Delete { span, .. }
+            | Access::ComputedRead { span, .. } => *span,
         }
     }
     pub fn context(&self) -> &Context {
         match self {
             Access::Read { context, .. }
             | Access::Write { context, .. }
-            | Access::Delete { context, .. } => context,
+            | Access::Delete { context, .. }
+            | Access::ComputedRead { context, .. } => context,
         }
     }
-    pub fn observable(&self) -> &str {
+    pub fn context_mut(&mut self) -> &mut Context {
+        match self {
+            Access::Read { context, .. }
+            | Access::Write { context, .. }
+            | Access::Delete { context, .. }
+            | Access::ComputedRead { context, .. } => context,
+        }
+    }
+    /// The observable or computed the access targets.
+    pub fn target(&self) -> &str {
         match self {
             Access::Read { observable, .. }
             | Access::Write { observable, .. }
             | Access::Delete { observable, .. } => observable,
+            Access::ComputedRead { computed, .. } => computed,
         }
     }
-    pub fn set_id(&mut self, value: String) {
+    pub fn target_mut(&mut self) -> &mut String {
         match self {
-            Access::Read { id, .. } | Access::Write { id, .. } | Access::Delete { id, .. } => {
-                *id = value
-            }
+            Access::Read { observable, .. }
+            | Access::Write { observable, .. }
+            | Access::Delete { observable, .. } => observable,
+            Access::ComputedRead { computed, .. } => computed,
         }
     }
     pub fn id(&self) -> &str {
         match self {
-            Access::Read { id, .. } | Access::Write { id, .. } | Access::Delete { id, .. } => id,
+            Access::Read { id, .. }
+            | Access::Write { id, .. }
+            | Access::Delete { id, .. }
+            | Access::ComputedRead { id, .. } => id,
         }
+    }
+    pub fn set_id(&mut self, value: String) {
+        match self {
+            Access::Read { id, .. }
+            | Access::Write { id, .. }
+            | Access::Delete { id, .. }
+            | Access::ComputedRead { id, .. } => *id = value,
+        }
+    }
+    pub fn is_read(&self) -> bool {
+        matches!(self, Access::Read { .. } | Access::ComputedRead { .. })
     }
 }
 
 #[derive(Serialize, Clone)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind")]
 pub enum FunctionRef {
     #[serde(rename = "inline")]
-    Inline { params: u32, #[serde(rename = "async")] is_async: bool, span: Span },
+    Inline {
+        params: u32,
+        #[serde(rename = "async")]
+        is_async: bool,
+        span: Span,
+    },
     #[serde(rename = "opaque")]
     Opaque { span: Span },
 }
@@ -247,6 +313,27 @@ pub struct Reaction {
     pub dependencies: Vec<String>,
     pub indirect_dependencies: Vec<String>,
     pub disposer_used: bool,
+    pub span: Span,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind")]
+pub enum ActionSource {
+    #[serde(rename = "runInAction")]
+    RunInAction,
+    #[serde(rename = "action")]
+    Action { name: Option<String>, binding: Option<Binding> },
+    #[serde(rename = "member")]
+    Member { observable: String, key: String, annotation: &'static str, bound: bool },
+}
+
+#[derive(Serialize)]
+pub struct Action {
+    pub kind: &'static str,
+    pub id: String,
+    pub source: ActionSource,
+    pub body: FunctionRef,
+    pub writes: Vec<String>,
     pub span: Span,
 }
 
