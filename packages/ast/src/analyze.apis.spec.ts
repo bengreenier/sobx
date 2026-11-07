@@ -749,6 +749,30 @@ describe("ids", () => {
 	});
 });
 
+describe("renumbering", () => {
+	// Regression: accesses in one function used to share a context object, which renumbering
+	// then remapped once per access (found by the Rust/Babel differential fuzz).
+	it("remaps each access's context exactly once", () => {
+		const mod = analyze(`
+			import { makeAutoObservable, action } from "sobx";
+			class S {
+				a = 1;
+				fn = () => { this.a; this.a; };
+				act = action(() => {});
+				constructor() { makeAutoObservable(this); }
+			}
+		`);
+		const fnAction = mod.actions.find(
+			(a) => a.source.kind === "member" && a.source.key === "fn",
+		)?.id;
+		expect(fnAction).toBe("action:0");
+		expect(mod.accesses.map((a) => a.context)).toEqual([
+			{ kind: "action", action: "action:0" },
+			{ kind: "action", action: "action:0" },
+		]);
+	});
+});
+
 describe("reassignment", () => {
 	it("reports a second observable assignment once", () => {
 		const mod = analyze(`

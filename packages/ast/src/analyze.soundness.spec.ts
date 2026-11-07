@@ -262,6 +262,30 @@ describe("indirect dependencies", () => {
 		expect(mod.computeds[0]?.indirectDependencies).toEqual([]);
 	});
 
+	it("follows optional calls", () => {
+		const mod = analyze(`
+			import { observable, autorun } from "sobx";
+			const s = observable({ a: 1, read() { return this.a; } });
+			autorun(() => s.read?.());
+			autorun(() => s?.read());
+		`);
+		expect(mod.reactions.map((r) => r.indirectDependencies.length)).toEqual([
+			1, 1,
+		]);
+	});
+
+	it("does not count a TypeScript this parameter", () => {
+		const mod = analyze(`
+			import { makeAutoObservable } from "sobx";
+			class S {
+				a = 1;
+				constructor() { makeAutoObservable(this); }
+				method(this: S, x: number) { this.a = x; }
+			}
+		`);
+		expect(mod.actions[0]?.body).toMatchObject({ kind: "inline", params: 1 });
+	});
+
 	it("handles recursion", () => {
 		const mod = analyze(`
 			import { observable, autorun } from "sobx";

@@ -1327,7 +1327,7 @@ class ModuleAnalyzer {
 			this.functionRoles.set(node, role);
 			return {
 				kind: "inline",
-				params: node.params.length,
+				params: runtimeParamCount(node.params),
 				async: node.async,
 				span: toSpan(node),
 			};
@@ -1594,7 +1594,8 @@ class ModuleAnalyzer {
 					observable,
 					key,
 					receiver,
-					context,
+					// A fresh object per access: renumbering rewrites contexts in place.
+					context: { ...context },
 					span: toSpan(prop),
 				},
 				at,
@@ -1769,12 +1770,12 @@ class ModuleAnalyzer {
 							in: role.kind === "action" ? role.action : role.by,
 						};
 					}
-					return role;
+					return { ...role };
 				}
 				if (role.kind === "tracked") {
 					return { kind: "tracked-nested", by: role.by };
 				}
-				if (role.kind === "effect") return role;
+				if (role.kind === "effect") return { ...role };
 				// A function nested in an action body may run after the action completes.
 				return { kind: "untracked" };
 			}
@@ -1899,8 +1900,11 @@ class ModuleAnalyzer {
 					Function(p) {
 						p.skip();
 					},
-					CallExpression: (p) => {
-						const target = this.resolveCallTarget(p);
+					// Optional calls (`s.m?.()`) run during tracking too.
+					"CallExpression|OptionalCallExpression": (p) => {
+						const target = this.resolveCallTarget(
+							p as NodePath<t.CallExpression | t.OptionalCallExpression>,
+						);
 						if (target && !visited.has(target)) {
 							visited.add(target);
 							queue.push(target);
@@ -1921,7 +1925,9 @@ class ModuleAnalyzer {
 	}
 
 	/** The function a call invokes, if it is a local function or a method of an observable. */
-	private resolveCallTarget(call: NodePath<t.CallExpression>): t.Node | null {
+	private resolveCallTarget(
+		call: NodePath<t.CallExpression | t.OptionalCallExpression>,
+	): t.Node | null {
 		const callee = call.node.callee;
 		if (t.isIdentifier(callee)) {
 			const binding = call.scope.getBinding(callee.name);
@@ -1941,7 +1947,12 @@ class ModuleAnalyzer {
 			}
 			return null;
 		}
-		if (!t.isMemberExpression(callee)) return null;
+		if (
+			!t.isMemberExpression(callee) &&
+			!t.isOptionalMemberExpression(callee)
+		) {
+			return null;
+		}
 		const key = memberKey(callee);
 		if (key.kind !== "static") return null;
 
@@ -2050,17 +2061,21 @@ class ModuleAnalyzer {
 		for (const access of accesses) {
 			if (access.kind === "ComputedRead") access.computed = c(access.computed);
 			else access.observable = o(access.observable);
+			// Build a new context rather than editing in place: context objects may be shared.
 			const ctx = access.context;
 			if (ctx.kind === "tracked" || ctx.kind === "tracked-nested") {
-				ctx.by = d(ctx.by);
+				access.context = { kind: ctx.kind, by: d(ctx.by) };
 			} else if (ctx.kind === "effect") {
-				ctx.reaction = r(ctx.reaction);
+				access.context = { kind: "effect", reaction: r(ctx.reaction) };
 			} else if (ctx.kind === "action") {
-				ctx.action = a(ctx.action);
+				access.context = { kind: "action", action: a(ctx.action) };
 			} else if (ctx.kind === "after-await") {
-				ctx.in = ctx.in.startsWith("action:")
-					? a(ctx.in as ActionId)
-					: d(ctx.in as DerivationId);
+				access.context = {
+					kind: "after-await",
+					in: ctx.in.startsWith("action:")
+						? a(ctx.in as ActionId)
+						: d(ctx.in as DerivationId),
+				};
 			}
 		}
 		for (const diagnostic of this.diagnostics) {
@@ -2348,6 +2363,14 @@ function propertyKey(key: t.Node, computed: boolean): AccessKey {
 		return { kind: "static", name: key.quasis[0]?.value.cooked ?? "" };
 	}
 	return { kind: "dynamic" };
+}
+
+/** Parameter count, excluding a TypeScript `this:` parameter (not a runtime parameter). */
+function runtimeParamCount(params: t.Function["params"]): number {
+	const first = params[0];
+	return t.isIdentifier(first, { name: "this" })
+		? params.length - 1
+		: params.length;
 }
 
 function memberKey(
