@@ -37,5 +37,13 @@
 		"@babel/parser": "^8.0.4",
 		"@babel/traverse": "^8.0.4",
 		"@babel/types": "^8.0.4"
+	},
+	"devDependencies": {
+		"@typescript-eslint/scope-manager": "8.72.1",
+		"@typescript-eslint/types": "8.72.1",
+		"@typescript-eslint/typescript-estree": "8.72.1",
+		"@typescript-eslint/visitor-keys": "8.72.1",
+		"oxc-parser": "0.157.0",
+		"typescript": "^6.0.3"
 	}
 }
