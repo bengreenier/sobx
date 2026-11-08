@@ -7,6 +7,16 @@
  * by computeds and reactions. This is the general (slower) path; the sobx compiler turns
  * local object observables it can fully see into a plain `ProxyLike` instead.
  */
+
+import { createFlow, type FlowPromise } from "./async.js";
+import {
+	type BoxOptions,
+	type CollectionOptions,
+	enhance,
+	ObservableBox,
+	ObservableMap,
+	ObservableSet,
+} from "./collections.js";
 import {
 	type Computed,
 	type ComputedOptions,
@@ -19,7 +29,7 @@ type AnyRecord = Record<PropertyKey, unknown>;
 
 /** An effective annotation, as attached to the annotation functions below. */
 export interface Annotation {
-	kind: "observable" | "computed" | "action" | "autoAction";
+	kind: "observable" | "computed" | "action" | "autoAction" | "flow";
 	/** `observable.ref` / `.shallow` / `.struct` / `.deep`, `computed.struct`. */
 	modifier?: "deep" | "ref" | "shallow" | "struct";
 	/** `action.bound`, or `autoBind`. */
@@ -72,7 +82,8 @@ function administration(target: object): ProxyLike<AnyRecord> {
 		ADMINISTRATION
 	];
 	if (!adm) {
-		adm = new ProxyLike<AnyRecord>({});
+		// Values are enhanced per annotation, not by the store.
+		adm = new ProxyLike<AnyRecord>({}, { deep: false });
 		Object.defineProperty(target, ADMINISTRATION, { value: adm });
 	}
 	return adm;
@@ -136,6 +147,7 @@ function isGenerator(fn: unknown): boolean {
 
 function infer(descriptor: PropertyDescriptor, autoBind: boolean): Annotation {
 	if (descriptor.get) return { kind: "computed" };
+	if (isGenerator(descriptor.value)) return { kind: "flow", bound: autoBind };
 	if (typeof descriptor.value === "function") {
 		return { kind: "autoAction", bound: autoBind };
 	}
@@ -168,16 +180,14 @@ function apply(
 					`sobx: "${name}" is an accessor and can't be observable.`,
 				);
 			}
-			if (isGenerator(descriptor.value)) {
-				throw new Error(`sobx: "${name}": flows are not supported yet.`);
-			}
 			const adm = administration(target);
-			adm.init(key, descriptor.value);
+			const prepare = enhancerFor(annotation);
+			adm.init(key, prepare(descriptor.value));
 			if (annotation.modifier === "struct") adm.setEquals(key, deepEqual);
 			Object.defineProperty(target, key, {
 				get: () => adm.get(key),
 				set: (value) => {
-					adm.set(key, value);
+					adm.set(key, prepare(value));
 				},
 				enumerable: true,
 				configurable: true,
@@ -210,9 +220,6 @@ function apply(
 			if (typeof fn !== "function") {
 				throw new Error(`sobx: action "${name}" must be a function.`);
 			}
-			if (isGenerator(fn)) {
-				throw new Error(`sobx: "${name}": flows are not supported yet.`);
-			}
 			const bound = annotation.bound || options.autoBind;
 			const wrapped = createAction(
 				bound ? fn.bind(target) : fn,
@@ -226,7 +233,28 @@ function apply(
 			});
 			return;
 		}
+		case "flow": {
+			const fn = descriptor.value;
+			if (!isGenerator(fn)) {
+				throw new Error(`sobx: flow "${name}" must be a generator function.`);
+			}
+			const bound = annotation.bound || options.autoBind;
+			Object.defineProperty(target, key, {
+				value: createFlow(bound ? fn.bind(target) : fn),
+				writable: true,
+				enumerable: false,
+				configurable: true,
+			});
+			return;
+		}
 	}
+}
+
+/** Observable values (deep / shallow) make a plain Map / Set observable, as in MobX. */
+function enhancerFor(annotation: Annotation): <V>(value: V) => V {
+	return annotation.modifier === "deep" || annotation.modifier === "shallow"
+		? enhance
+		: (value) => value;
 }
 
 /**
@@ -304,10 +332,16 @@ function createObservableObject<T extends object>(
 	overrides?: AnnotationsMap<T>,
 	options?: ObservableOptions,
 ): T {
-	if (Array.isArray(value) || value instanceof Map || value instanceof Set) {
+	if (Array.isArray(value)) {
 		throw new Error(
-			"sobx: observable arrays, Maps and Sets are not supported yet; use a plain object.",
+			"sobx: observable arrays are not supported yet; use a plain object, a Map or a Set.",
 		);
+	}
+	if (value instanceof Map) {
+		return new ObservableMap(value, options) as unknown as T;
+	}
+	if (value instanceof Set) {
+		return new ObservableSet(value, options) as unknown as T;
 	}
 	const proto =
 		typeof value === "object" && value !== null
@@ -344,16 +378,17 @@ function observableDecorator(annotation: Annotation) {
 			);
 		}
 		const key = context.name;
+		const prepare = enhancerFor(annotation);
 		return {
 			get(this: object) {
 				return administration(this).get(key);
 			},
 			set(this: object, value: unknown) {
-				administration(this).set(key, value);
+				administration(this).set(key, prepare(value));
 			},
 			init(this: object, value: unknown) {
 				const adm = administration(this);
-				adm.init(key, value);
+				adm.init(key, prepare(value));
 				if (annotation.modifier === "struct") adm.setEquals(key, deepEqual);
 				return value;
 			},
@@ -433,11 +468,33 @@ export type MethodAnnotation = <This, A extends unknown[], R>(
 ) => (this: This, ...args: A) => R;
 
 export interface ObservableFn extends AccessorAnnotation {
+	<K, V>(
+		value: Map<K, V>,
+		overrides?: null,
+		options?: CollectionOptions,
+	): ObservableMap<K, V>;
+	<T>(
+		value: Set<T>,
+		overrides?: null,
+		options?: CollectionOptions,
+	): ObservableSet<T>;
 	<T extends object>(
 		value: T,
 		overrides?: AnnotationsMap<T>,
 		options?: ObservableOptions,
 	): T;
+	/** `observable.box(value, options?)`: a single observable value. */
+	box<T>(value: T, options?: BoxOptions<T>): ObservableBox<T>;
+	/** `observable.map(entries?, options?)`: an observable Map. */
+	map<K, V>(
+		entries?: Iterable<readonly [K, V]> | Record<string, V> | null,
+		options?: CollectionOptions,
+	): ObservableMap<K, V>;
+	/** `observable.set(values?, options?)`: an observable Set. */
+	set<T>(
+		values?: Iterable<T> | null,
+		options?: CollectionOptions,
+	): ObservableSet<T>;
 	ref: AccessorAnnotation;
 	shallow: AccessorAnnotation;
 	struct: AccessorAnnotation;
@@ -480,6 +537,18 @@ observable.deep = decoratorOnly(
 	{ kind: "observable", modifier: "deep" },
 	"observable.deep",
 );
+observable.box = (value, options) => new ObservableBox(value, options);
+observable.map = <K, V>(
+	entries?: Iterable<readonly [K, V]> | Record<string, V> | null,
+	options?: CollectionOptions,
+) =>
+	new ObservableMap<K, V>(
+		entries && !(Symbol.iterator in entries)
+			? (Object.entries(entries) as unknown as Array<[K, V]>)
+			: (entries as Iterable<readonly [K, V]> | null | undefined),
+		options,
+	);
+observable.set = (values, options) => new ObservableSet(values, options);
 
 export interface ComputedFn extends GetterAnnotation {
 	<T>(fn: () => T, options?: ComputedOptions<T>): Computed<T>;
@@ -554,6 +623,71 @@ action.bound = annotate(
 	},
 	{ kind: "action", bound: true },
 ) as unknown as MethodAnnotation;
+
+// biome-ignore lint/suspicious/noExplicitAny: flows wrap generators of any signature
+type GeneratorFn = (...args: any[]) => Generator<unknown, unknown, unknown>;
+
+function flowDecorator(bound: boolean) {
+	return (fn: GeneratorFn, context: DecoratorContext) => {
+		if (context.kind !== "method") {
+			throw new Error(
+				`sobx: @flow on "${String(context.name)}" must decorate a generator method.`,
+			);
+		}
+		const wrapped = createFlow(fn);
+		if (bound) {
+			const key = context.name;
+			context.addInitializer(function (this: unknown) {
+				const self = this as AnyRecord;
+				self[key] = (self[key] as typeof wrapped).bind(self);
+			});
+		}
+		return wrapped;
+	};
+}
+
+/** `@flow *m()` (also usable in annotation maps). */
+export type FlowAnnotation = <This, A extends unknown[], R>(
+	fn: (this: This, ...args: A) => Generator<unknown, R, unknown>,
+	context: ClassMethodDecoratorContext<
+		This,
+		(this: This, ...args: A) => Generator<unknown, R, unknown>
+	>,
+) => (this: This, ...args: A) => FlowPromise<R>;
+
+export interface FlowFn extends FlowAnnotation {
+	<A extends unknown[], R>(
+		generator: (...args: A) => Generator<unknown, R, unknown>,
+	): (...args: A) => FlowPromise<R>;
+	bound: FlowAnnotation;
+}
+
+const plainFlowDecorator = flowDecorator(false);
+const boundFlowDecorator = flowDecorator(true);
+
+/**
+ * `flow(function* () {...})`: an async action written as a generator; each step between
+ * `yield`s runs as an action. Also an annotation and a method decorator (`@flow *m()`,
+ * `@flow.bound *m()`).
+ */
+export const flow = annotate(
+	(generator: GeneratorFn, context?: unknown) =>
+		isDecoratorContext(context)
+			? plainFlowDecorator(generator, context)
+			: createFlow(generator),
+	{ kind: "flow" },
+) as unknown as FlowFn;
+flow.bound = annotate(
+	(generator: GeneratorFn, context?: unknown) => {
+		if (!isDecoratorContext(context)) {
+			throw new Error(
+				"sobx: flow.bound can only be used as an annotation or decorator.",
+			);
+		}
+		return boundFlowDecorator(generator, context);
+	},
+	{ kind: "flow", bound: true },
+) as unknown as FlowAnnotation;
 
 /** Run `fn` now as an action (batched, untracked) and return its result. */
 export function runInAction<T>(fn: () => T): T {

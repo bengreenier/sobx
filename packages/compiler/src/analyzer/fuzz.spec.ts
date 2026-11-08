@@ -34,7 +34,7 @@ export function program(seed: number): string {
 	let uid = 0;
 	const fresh = (prefix: string) => `${prefix}${uid++}`;
 	const lines: string[] = [
-		'import { observable, reaction, autorun, computed, action, runInAction, makeObservable, makeAutoObservable } from "@sobx/magic";',
+		'import { observable, reaction, autorun, computed, action, runInAction, makeObservable, makeAutoObservable, when, flow, comparer } from "@sobx/magic";',
 		'import { external } from "./external";',
 	];
 
@@ -191,6 +191,25 @@ export function program(seed: number): string {
 		} else if (choice < 0.85 && !exported.has(s)) {
 			exported.add(s);
 			lines.push(`export { ${s} };`);
+		} else if (choice < 0.88) {
+			lines.push(
+				chance(0.5)
+					? `when(() => ${access(s)}, () => { ${body(s)} });`
+					: `await when(() => ${access(s)}, { timeout: 10 });`,
+			);
+		} else if (choice < 0.91) {
+			lines.push(
+				`const ${fresh("fl")} = flow(function* () { ${body(s)} yield load(); ${body(s)} });`,
+			);
+		} else if (choice < 0.94) {
+			const v = fresh("v");
+			lines.push(
+				pick([
+					`const ${v} = observable.box(0, { equals: comparer.structural }); ${v}.set(1);`,
+					`const ${v} = observable.map(); ${v}.set("k", ${access(s)});`,
+					`const ${v} = observable(new Set()); autorun(() => ${v}.has(1));`,
+				]),
+			);
 		} else {
 			lines.push(body(s));
 		}

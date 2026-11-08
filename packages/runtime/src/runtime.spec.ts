@@ -313,11 +313,8 @@ describe("observable()", () => {
 		expect(run).toHaveBeenCalledTimes(2);
 	});
 
-	it("rejects arrays, Maps, Sets and class instances", () => {
-		expect(() => observable([1] as unknown as object)).toThrow(
-			/arrays, Maps and Sets/,
-		);
-		expect(() => observable(new Map())).toThrow(/arrays, Maps and Sets/);
+	it("rejects arrays and class instances", () => {
+		expect(() => observable([1] as unknown as object)).toThrow(/arrays/);
 		expect(() => observable(new (class {})())).toThrow(/plain objects/);
 	});
 });

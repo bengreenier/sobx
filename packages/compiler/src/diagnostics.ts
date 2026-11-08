@@ -58,14 +58,19 @@ export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 		"make-observable-outside-constructor": "info",
 		"unresolved-import": "info",
 		"runtime-observable": "info",
+		"opaque-observable": "info",
 	};
 
 /** Options the runtime implements, per API. */
 const SUPPORTED_OPTIONS = {
 	reaction: ["fireImmediately", "equals", "name"],
 	autorun: ["name"],
+	when: ["timeout", "name"],
 	computed: ["equals", "name", "keepAlive"],
 	observable: ["autoBind", "deep", "name", "proxy"],
+	"observable.box": ["equals", "deep", "name"],
+	"observable.map": ["deep", "name"],
+	"observable.set": ["deep", "name"],
 } as const;
 
 const SPECIFIC_MESSAGES: Partial<Record<CompileDiagnosticCode, string>> = {
@@ -110,8 +115,16 @@ export function compileDiagnostics(
 	};
 	for (const r of mod.reactions) checkOptions(r.api, r.options, r.span);
 	for (const c of mod.computeds) checkOptions("computed", c.options, c.span);
-	for (const o of mod.observables)
-		checkOptions("observable", o.options, o.span);
+	for (const o of mod.observables) {
+		const kind = o.shape.kind;
+		checkOptions(
+			kind === "box" || kind === "map" || kind === "set"
+				? `observable.${kind}`
+				: "observable",
+			o.options,
+			o.span,
+		);
+	}
 
 	for (const o of mod.observables) {
 		const reason = plan.fallbacks.get(o.id);

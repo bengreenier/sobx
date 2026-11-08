@@ -13,12 +13,20 @@ export type {
 	AnnotationsMap,
 	AnnotationValue,
 	AutorunOptions,
+	BoxOptions,
+	CancellablePromise,
+	CollectionOptions,
 	Computed,
 	ComputedOptions,
 	Disposer,
+	FlowPromise,
+	ObservableBox,
+	ObservableMap,
 	ObservableOptions,
+	ObservableSet,
 	Reaction,
 	ReactionOptions,
+	WhenOptions,
 } from "@sobx/runtime";
 
 function notCompiled(name: string): never {
@@ -43,6 +51,9 @@ export const observable: runtime.ObservableFn = placeholder("observable", [
 	"shallow",
 	"struct",
 	"deep",
+	"box",
+	"map",
+	"set",
 ]);
 export const computed: runtime.ComputedFn = placeholder("computed", ["struct"]);
 export const action: runtime.ActionFn = placeholder("action", ["bound"]);
@@ -54,3 +65,11 @@ export const makeObservable =
 	placeholder<typeof runtime.makeObservable>("makeObservable");
 export const makeAutoObservable =
 	placeholder<typeof runtime.makeAutoObservable>("makeAutoObservable");
+export const when = placeholder<typeof runtime.when>("when");
+export const flow: runtime.FlowFn = placeholder("flow", ["bound"]);
+export const comparer: typeof runtime.comparer = {
+	default: placeholder("comparer.default"),
+	identity: placeholder("comparer.identity"),
+	structural: placeholder("comparer.structural"),
+	shallow: placeholder("comparer.shallow"),
+};

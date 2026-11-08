@@ -7,7 +7,7 @@ import { analyze } from "./native.js";
 import { type TransformSobxOptions, transformSobx } from "./transform.js";
 import { PARSER_PLUGINS, SobxTransformer } from "./transformers/sobx.js";
 
-const HEADER = `import { observable, computed, reaction, autorun, action, runInAction, makeObservable, makeAutoObservable } from "@sobx/magic";\n`;
+const HEADER = `import { observable, computed, reaction, autorun, action, runInAction, makeObservable, makeAutoObservable, when, flow, comparer } from "@sobx/magic";\n`;
 
 function compileFull(
 	body: string,
@@ -233,6 +233,70 @@ autorun(() => log(s.a + s.b));
 const both = action((n) => { s.a = n; s.b = n; });
 both(5);`),
 		).toEqual([2, 10]);
+	});
+});
+
+describe("compiled code: when, flow, collections, comparer", () => {
+	it("when runs its effect once", () => {
+		expect(
+			run(`const s = observable({ n: 0 });
+when(() => s.n > 1, () => log("ready at " + s.n));
+s.n = 1; s.n = 2; s.n = 3;`),
+		).toEqual(["ready at 2"]);
+	});
+
+	it("flow runs its steps as actions", async () => {
+		const logs = run(`const s = observable({ a: 0, b: 0 });
+autorun(() => log(s.a + s.b));
+const load = flow(function* () {
+  s.a = 1; s.b = 1;
+  yield Promise.resolve();
+  s.a = 2; s.b = 2;
+});
+load().then(() => log("done"));`);
+		await new Promise((r) => setTimeout(r, 0));
+		expect(logs).toEqual([0, 2, 4, "done"]);
+	});
+
+	it("observable Maps, Sets and boxes", () => {
+		expect(
+			run(`const m = observable.map();
+const tags = observable(new Set());
+const count = observable.box(0);
+autorun(() => log(m.size + tags.size + count.get()));
+m.set("a", 1);
+tags.add("x");
+count.set(5);`),
+		).toEqual([0, 1, 2, 7]);
+	});
+
+	it("Maps inside fast-path objects are observable", () => {
+		const { code } = compileFull(`const s = observable({ byId: new Map() });
+autorun(() => log(s.byId.size));
+s.byId.set("a", 1);`);
+		expect(code).toContain("new ProxyLike(");
+		expect(
+			run(`const s = observable({ byId: new Map() });
+autorun(() => log(s.byId.size));
+s.byId.set("a", 1);`),
+		).toEqual([0, 1]);
+	});
+
+	it("comparer in options", () => {
+		expect(
+			run(`const s = observable({ p: { x: 1 } });
+reaction(() => s.p, (p) => log(p.x), { equals: comparer.structural });
+s.p = { x: 1 };
+s.p = { x: 2 };`),
+		).toEqual([2]);
+	});
+
+	it("unsupported options are still errors", () => {
+		expect(
+			codes(
+				`const s = observable({ a: 1 }); when(() => s.a, () => {}, { onError: () => {} });`,
+			),
+		).toContainEqual(["unsupported-option", "error"]);
 	});
 });
 

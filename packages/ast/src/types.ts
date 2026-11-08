@@ -77,16 +77,24 @@ export type ModeledApi =
 	| "action"
 	| "autorun"
 	| "computed"
+	| "flow"
 	| "makeAutoObservable"
 	| "makeObservable"
 	| "observable"
 	| "reaction"
-	| "runInAction";
+	| "runInAction"
+	| "when";
 
-/** MobX APIs that are recognized but not modeled. Usages are reported as {@link UnsupportedUsage}. */
-export type UnmodeledApi = "flow" | "when";
+/**
+ * MobX APIs that are recognized but not modeled. Usages are reported as {@link UnsupportedUsage}.
+ * (None at the moment.)
+ */
+export type UnmodeledApi = never;
 
-export type KnownApi = ModeledApi | UnmodeledApi;
+/** Plain values that are recognized and may be used anywhere (e.g. `comparer.structural`). */
+export type ValueApi = "comparer";
+
+export type KnownApi = ModeledApi | UnmodeledApi | ValueApi;
 
 /** A single binding introduced by an import from the configured module specifier. */
 export type SobxImport =
@@ -182,6 +190,10 @@ export type ObservableShape =
 			/** True when the literal/class has spreads or computed keys, so `members` is incomplete. */
 			open: boolean;
 	  }
+	/** `observable.box(v)`, `observable.map()` / `observable(new Map())`, `observable.set()` / `observable(new Set())`. Their reads and writes are tracked by the runtime, not analyzed. */
+	| { kind: "box" }
+	| { kind: "map" }
+	| { kind: "set" }
 	| { kind: "unknown" };
 
 /**
@@ -393,19 +405,33 @@ export interface AutorunReaction extends ReactionBase {
 	body: FunctionRef;
 }
 
-export type Reaction = DataEffectReaction | AutorunReaction;
+/**
+ * `when(predicate, effect, options?)`, or `when(predicate, options?)` (returns a promise, so
+ * there is no effect).
+ */
+export interface WhenReaction extends ReactionBase {
+	api: "when";
+	/** Tracked until it returns true. */
+	predicate: FunctionRef;
+	/** Run once the predicate is true (absent in the promise form). */
+	effect?: FunctionRef;
+}
+
+export type Reaction = DataEffectReaction | AutorunReaction | WhenReaction;
 
 export type ActionSource =
 	/** `runInAction(fn)`: runs once, immediately. */
 	| { kind: "runInAction" }
 	/** `action(fn)` / `action(name, fn)`: wraps a function that runs whenever called. */
 	| { kind: "action"; name: string | null; binding: Binding | null }
-	/** A member annotated `action` / `autoAction` on an observable object or class. */
+	/** `flow(function* () {...})`: each step between `yield`s runs as an action. */
+	| { kind: "flow"; binding: Binding | null }
+	/** A member annotated `action` / `autoAction` / `flow` on an observable object or class. */
 	| {
 			kind: "member";
 			observable: ObservableId;
 			key: string;
-			annotation: "action" | "autoAction";
+			annotation: "action" | "autoAction" | "flow";
 			bound: boolean;
 	  };
 
@@ -444,8 +470,10 @@ export type DiagnosticCode =
 	| "api-not-called"
 	/** An API was called with missing / malformed arguments. */
 	| "invalid-arguments"
-	/** `observable([...])` / `observable(new Map())` etc.: arrays, Maps and Sets are not modeled. */
+	/** `observable([...])`: observable arrays are not supported. */
 	| "observable-collection"
+	/** An observable box, Map or Set: tracked by the runtime, its reads and writes are not analyzed. */
+	| "opaque-observable"
 	/** `observable(...)` / `computed(...)` result not bound to a simple identifier. */
 	| "unbound-observable"
 	/** An observable (or class, instance, computed) reference escapes analysis. */

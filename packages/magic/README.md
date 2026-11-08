@@ -8,7 +8,7 @@ The MobX-compatible API you write sobx code against. Its exports are placeholder
 
 Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to your build. Most MobX code that uses plain observable objects, classes (`makeObservable` / `makeAutoObservable` / standard decorators), `computed`, `reaction`, `autorun` and actions works unchanged.
 
-It is **not a complete drop-in**. Observables are shallow, and arrays, Maps, Sets, boxes, `when` and `flow` aren't supported. The compiler fails the build on anything that wouldn't behave like MobX, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
+It is **not a complete drop-in**: observable arrays aren't supported, and nested plain objects and arrays aren't made observable (Maps and Sets are). The compiler fails the build on anything that wouldn't behave like MobX, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
 ## Install
 
@@ -21,12 +21,13 @@ pnpm add -D @sobx/compiler
 
 ## Exports
 
-- **`observable(object, overrides?, options?)`**, plus the `observable.ref` / `.shallow` / `.struct` / `.deep` annotations
+- **`observable(object, overrides?, options?)`**, `observable(new Map())` / `observable(new Set())`, **`observable.box`** / **`.map`** / **`.set`**, plus the `observable.ref` / `.shallow` / `.struct` / `.deep` annotations
 - **`computed(fn, options?)`**, plus `computed.struct`
-- **`reaction(data, effect, options?)`**, **`autorun(fn)`**
-- **`action(fn)`** / **`action(name, fn)`**, plus `action.bound`; **`runInAction(fn)`**
+- **`reaction(data, effect, options?)`**, **`autorun(fn)`**, **`when(predicate, effect?, options?)`**
+- **`action(fn)`** / **`action(name, fn)`**, plus `action.bound`; **`runInAction(fn)`**; **`flow(generator)`**, plus `flow.bound`
+- **`comparer`** (`default`, `identity`, `structural`, `shallow`)
 - **`makeObservable(target, annotations, options?)`**, **`makeAutoObservable(target, overrides?, options?)`**
-- `observable`, `computed` and `action` also work as standard decorators: `@observable accessor x`, `@computed get x()`, `@action m()`.
+- `observable`, `computed`, `action` and `flow` also work as standard decorators: `@observable accessor x`, `@computed get x()`, `@action m()`, `@flow *m()`.
 
 ## What the compiler does
 

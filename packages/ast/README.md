@@ -21,7 +21,7 @@ pnpm add @sobx/ast
 
 ## The IR
 
-Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `action`, `runInAction`. Recognized but not yet modeled: `flow`, `when`. Observable arrays, Maps and Sets (`observable([])`, `observable(new Map())`) are reported (`observable-collection`) rather than modeled.
+Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `when`, `action`, `runInAction`, `flow`. `comparer` is recognized as a value. Observable boxes, Maps and Sets (`observable.box()`, `observable.map()`, `observable(new Map())`, ...) are recorded as observables with a `box` / `map` / `set` shape; their reads and writes are left to the runtime (`opaque-observable`, info). Observable arrays are reported (`observable-collection`).
 
 A `SobxModule` contains:
 
@@ -31,8 +31,8 @@ A `SobxModule` contains:
 | `observables` | Observable objects (`observable({...})`, `makeAutoObservable({...})`) with their binding, and observable classes (`makeObservable(this, ...)` / `makeAutoObservable(this)` in a constructor, or standard decorators alone) with their instances. Each has a shape whose members carry their effective annotation (explicit, decorator, or inferred, with `autoBind` / `deep` options applied) and links to backing computeds / actions. |
 | `computeds` | `computed(...)` boxes and `computed` getters, with their body, direct dependency access ids, and indirect dependencies (reads in functions the body calls). |
 | `accesses` | Every `Read` / `Write` / `Delete` of an observable property (via a binding or `this`), and every `ComputedRead` (`c.get()`), with its tracking context (`untracked`, `tracked`, `tracked-nested`, `effect`, `action`, `after-await`). Reads also record the nested property path (`store.user.name` → `["name"]`) and whether the value is called. |
-| `reactions` | Each `reaction(...)` (data / effect functions) and `autorun(...)` (body), with options, direct and indirect dependency access ids, and whether the disposer is used. |
-| `actions` | `runInAction(...)`, `action(...)`, and annotated members, with the write access ids they contain (writes after an `await` are excluded). |
+| `reactions` | Each `reaction(...)` (data / effect functions), `autorun(...)` (body) and `when(...)` (predicate / optional effect), with options, direct and indirect dependency access ids, and whether the disposer is used. |
+| `actions` | `runInAction(...)`, `action(...)`, `flow(...)`, and annotated members (including flows), with the write access ids they contain (writes after an `await` are excluded). |
 | `unsupported` | Usages of recognized-but-unmodeled APIs. |
 | `diagnostics` | Everything that could not be modeled precisely, with a code, severity, and span. |
 

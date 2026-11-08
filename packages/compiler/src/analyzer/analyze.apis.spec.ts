@@ -191,13 +191,112 @@ describe("action()", () => {
 		]);
 	});
 
-	it("reports unsupported API members", () => {
+	it("records boxes, Maps and Sets as opaque observables", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const b = observable.box(0);
+			const b = observable.box(0, { equals: eq });
+			const m = observable.map();
+			const s = observable.set([1]);
+			const m2 = observable(new Map(), {}, { name: "m" });
+			const s2 = observable(new Set());
+			b.set(1); m.set("k", 1); s.add(2);
+		`);
+		expect(
+			mod.observables.map((o) => [
+				o.shape.kind,
+				o.target === "object" ? o.binding?.name : null,
+				o.options?.kind === "object" ? Object.keys(o.options.entries) : null,
+			]),
+		).toEqual([
+			["box", "b", ["equals"]],
+			["map", "m", null],
+			["set", "s", null],
+			["map", "m2", ["name"]],
+			["set", "s2", null],
+		]);
+		expect(codes(mod)).toEqual(Array(5).fill("opaque-observable"));
+		expect(mod.diagnostics.every((d) => d.severity === "info")).toBe(true);
+		expect(mod.accesses).toEqual([]);
+	});
+
+	it("reports other API members", () => {
+		const mod = analyze(`
+			import { observable } from "@sobx/magic";
+			const a = observable.array([]);
 		`);
 		expect(codes(mod)).toEqual(["unsupported-api"]);
-		expect(mod.diagnostics[0]?.message).toContain("observable.box");
+		expect(mod.diagnostics[0]?.message).toContain("observable.array");
+	});
+
+	it("accepts comparer anywhere", () => {
+		const mod = analyze(`
+			import { observable, reaction, comparer } from "@sobx/magic";
+			const s = observable({ a: 1 });
+			reaction(() => s.a, () => {}, { equals: comparer.structural });
+			const eq = comparer.default;
+		`);
+		expect(codes(mod)).toEqual([]);
+		expect(mod.imports.map((i) => i.kind === "NamedImport" && i.api)).toEqual([
+			"observable",
+			"reaction",
+			"comparer",
+		]);
+	});
+});
+
+describe("when()", () => {
+	it("tracks the predicate and runs the effect untracked", () => {
+		const mod = analyze(`
+			import { observable, when } from "@sobx/magic";
+			const s = observable({ ready: false, n: 0 });
+			when(() => s.ready, () => { s.n = 1; }, { timeout: 100 });
+		`);
+		const [r] = mod.reactions;
+		expect(r).toMatchObject({
+			api: "when",
+			predicate: { kind: "inline" },
+			effect: { kind: "inline" },
+			dependencies: ["access:0"],
+		});
+		expect(mod.accesses.map((a) => a.context.kind)).toEqual([
+			"tracked",
+			"effect",
+		]);
+		expect(r?.options).toMatchObject({ entries: { timeout: {} } });
+	});
+
+	it("supports the promise form", () => {
+		const mod = analyze(`
+			import { observable, when } from "@sobx/magic";
+			const s = observable({ ready: false });
+			await when(() => s.ready, { timeout: 5 });
+		`);
+		const [r] = mod.reactions;
+		expect(r?.api).toBe("when");
+		expect(r && "effect" in r ? r.effect : undefined).toBeUndefined();
+		expect(r?.options).toMatchObject({ entries: { timeout: {} } });
+		expect(mod.diagnostics).toEqual([]);
+	});
+});
+
+describe("flow()", () => {
+	it("is an action whose writes after yield stay inside it", () => {
+		const mod = analyze(`
+			import { observable, flow } from "@sobx/magic";
+			const s = observable({ data: null, loading: false });
+			const load = flow(function* () {
+				s.loading = true;
+				s.data = yield fetchData();
+				s.loading = false;
+			});
+		`);
+		expect(mod.actions).toMatchObject([
+			{
+				source: { kind: "flow", binding: { name: "load" } },
+				writes: ["access:0", "access:1", "access:2"],
+			},
+		]);
+		expect(mod.diagnostics).toEqual([]);
 	});
 });
 
@@ -351,16 +450,35 @@ describe("makeObservable / makeAutoObservable", () => {
 		]);
 	});
 
-	it("reports generators inferred as flows", () => {
+	it("infers generators as flows", () => {
 		const mod = analyze(`
-			import { makeAutoObservable } from "@sobx/magic";
+			import { makeAutoObservable, makeObservable, flow } from "@sobx/magic";
 			class Store {
+				items = [];
 				constructor() { makeAutoObservable(this); }
+				*load() { this.items = yield fetchItems(); }
+			}
+			class Explicit {
+				constructor() { makeObservable(this, { load: flow.bound, bad: flow }); }
 				*load() {}
+				bad() {}
 			}
 		`);
-		expect(codes(mod)).toEqual(["unsupported-api"]);
-		expect(annotations(mod)).toEqual([["load", "flow"]]);
+		expect(annotations(mod)).toEqual([
+			["items", "observable.deep"],
+			["load", "flow"],
+		]);
+		expect(annotations(mod, 1)).toEqual([
+			["load", "flow.bound"],
+			["bad", "flow"],
+		]);
+		expect(mod.actions.map((a) => a.source)).toMatchObject([
+			{ kind: "member", key: "load", annotation: "flow", bound: false },
+			{ kind: "member", key: "load", annotation: "flow", bound: true },
+		]);
+		expect(mod.actions[0]?.writes).toEqual(["access:0"]);
+		expect(codes(mod)).toEqual(["invalid-annotation"]);
+		expect(mod.diagnostics[0]?.message).toContain("must be a generator");
 	});
 
 	it("reads decorators when makeObservable has no annotations", () => {

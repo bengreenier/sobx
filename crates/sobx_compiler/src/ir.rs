@@ -102,6 +102,12 @@ pub enum Shape {
     Object { members: Vec<Member>, open: bool },
     #[serde(rename = "unknown")]
     Unknown,
+    #[serde(rename = "box")]
+    Box,
+    #[serde(rename = "map")]
+    Map,
+    #[serde(rename = "set")]
+    Set,
 }
 
 #[derive(Serialize)]
@@ -309,6 +315,8 @@ pub struct Reaction {
     pub effect: Option<FunctionRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<FunctionRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub predicate: Option<FunctionRef>,
     pub options: Option<Options>,
     pub dependencies: Vec<String>,
     pub indirect_dependencies: Vec<String>,
@@ -325,6 +333,8 @@ pub enum ActionSource {
     Action { name: Option<String>, binding: Option<Binding> },
     #[serde(rename = "member")]
     Member { observable: String, key: String, annotation: &'static str, bound: bool },
+    #[serde(rename = "flow")]
+    Flow { binding: Option<Binding> },
 }
 
 #[derive(Serialize)]

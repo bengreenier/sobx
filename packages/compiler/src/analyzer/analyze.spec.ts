@@ -95,12 +95,14 @@ describe("analyze: imports", () => {
 		]);
 	});
 
-	it("records unmodeled APIs as unsupported usages", () => {
+	it("models flow and when", () => {
 		const mod = analyze(
 			`import { flow, when } from "@sobx/magic"; flow(function* () {}); when(() => true);`,
 		);
-		expect(mod.unsupported.map((u) => u.api)).toEqual(["flow", "when"]);
-		expect(codes(mod)).toEqual(["unsupported-api", "unsupported-api"]);
+		expect(mod.unsupported).toEqual([]);
+		expect(mod.actions.map((a) => a.source.kind)).toEqual(["flow"]);
+		expect(mod.reactions.map((r) => r.api)).toEqual(["when"]);
+		expect(codes(mod)).toEqual([]);
 	});
 
 	it("reports APIs used other than as a direct call", () => {

@@ -298,21 +298,15 @@ describe("indirect dependencies", () => {
 });
 
 describe("collections", () => {
-	it("reports observable arrays, Maps and Sets", () => {
+	it("reports observable arrays", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
 			const a = observable([1, 2]);
-			const m = observable(new Map());
-			const s = observable(new Set());
-			const w = observable(new WeakMap());
 			const ok = observable({ list: [] });
 			const unknown = observable(value);
 		`);
 		expect(mod.diagnostics.map((d) => [d.code, d.related])).toEqual([
 			["observable-collection", ["observable:0"]],
-			["observable-collection", ["observable:1"]],
-			["observable-collection", ["observable:2"]],
-			["observable-collection", ["observable:3"]],
 		]);
 	});
 });

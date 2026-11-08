@@ -18,20 +18,27 @@ const MODELED: &[&str] = &[
     "action",
     "autorun",
     "computed",
+    "flow",
     "makeAutoObservable",
     "makeObservable",
     "observable",
     "reaction",
     "runInAction",
+    "when",
 ];
-const UNMODELED: &[&str] = &["flow", "when"];
+/// Recognized APIs whose uses are not analyzed (none at the moment).
+const UNMODELED: &[&str] = &[];
+/// Plain values (not calls) that are recognized and allowed anywhere.
+const VALUES: &[&str] = &["comparer"];
+/// `observable.<kind>(...)` constructors.
+const OBSERVABLE_VALUES: &[&str] = &["box", "map", "set"];
 const ANNOTATING: &[&str] = &["observable", "makeObservable", "makeAutoObservable"];
 const OBJECT_ENUMERATORS: &[&str] = &["keys", "values", "entries", "assign", "getOwnPropertyNames", "freeze"];
 const MUTATING_ARRAY_METHODS: &[&str] =
     &["copyWithin", "fill", "pop", "push", "reverse", "shift", "sort", "splice", "unshift"];
 
 fn known_api(name: &str) -> Option<&'static str> {
-    MODELED.iter().chain(UNMODELED.iter()).find(|api| **api == name).copied()
+    MODELED.iter().chain(UNMODELED.iter()).chain(VALUES.iter()).find(|api| **api == name).copied()
 }
 
 /// The role a function plays, which determines the context of accesses inside it.
@@ -180,21 +187,36 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         self.collect_imports();
 
         // action() calls first, so observable members holding them can link to them.
-        for call in self.sorted(&["action"]) {
-            self.visit_action_call(call);
+        for call in self.sorted(&["action", "flow"]) {
+            if self.callee_api(call) == Some("flow") {
+                self.visit_flow_call(call);
+            } else {
+                self.visit_action_call(call);
+            }
         }
         // Observables, including their getters / methods.
-        for call in self.sorted(&["observable", "makeObservable", "makeAutoObservable"]) {
+        for call in self.sorted(&[
+            "observable",
+            "makeObservable",
+            "makeAutoObservable",
+            "observable.box",
+            "observable.map",
+            "observable.set",
+        ]) {
             match self.callee_api(call) {
                 Some("observable") => self.visit_observable_call(call),
                 Some(api) => self.visit_make_observable_call(call, api),
-                None => {}
+                None => {
+                    if let Some(kind) = self.observable_value_call(call) {
+                        self.create_value_observable(call, kind, 1);
+                    }
+                }
             }
         }
         self.register_decorated_classes();
 
         // Derivations and remaining actions, so accesses can be attributed to them.
-        for call in self.sorted(&["reaction", "autorun"]) {
+        for call in self.sorted(&["reaction", "autorun", "when"]) {
             self.visit_reaction_call(call);
         }
         for call in self.sorted(&["computed"]) {
@@ -355,6 +377,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             matches!(self.kind(*p), AstKind::CallExpression(c) if c.callee.span() == self.node_span(expr))
         });
         let span = self.span(node);
+        if api.is_some_and(|a| VALUES.contains(&a)) {
+            return;
+        }
 
         let Some(api) = api.filter(|a| !UNMODELED.contains(a)) else {
             self.unsupported.push(ir::UnsupportedUsage { kind: "UnsupportedUsage", api, local: local.into(), span });
@@ -367,6 +392,25 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         if self.is_annotation_position(position) {
             if self.parent(position).is_some_and(|p| matches!(self.kind(p), AstKind::Decorator(_))) {
                 self.decorator_refs.push(node);
+            }
+            return;
+        }
+        if let Some(member) = member_name.as_deref()
+            && api == "observable"
+            && let Some(kind) = OBSERVABLE_VALUES.iter().find(|k| **k == member)
+        {
+            match call {
+                Some(call) => self.calls.entry(observable_value_key(kind)).or_default().push(call),
+                None => {
+                    let s = self.span(expr);
+                    self.diagnose(
+                        "api-not-called",
+                        "error",
+                        format!("\"{local}.{member}\" must be called directly; other uses cannot be analyzed."),
+                        s,
+                        vec![],
+                    );
+                }
             }
             return;
         }
@@ -443,11 +487,60 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 vec![],
             );
         }
+        if let Some(kind) = first.and_then(collection_kind) {
+            self.create_value_observable(call_id, kind, 2);
+            return;
+        }
         let object = match first {
             Some(Argument::ObjectExpression(o)) => Some(&**o),
             _ => None,
         };
         self.create_object_observable(call_id, call, "observable", object, call.arguments.get(1));
+    }
+
+    /// `observable.box/map/set(...)`: which kind, if `call` is one.
+    fn observable_value_call(&self, call: NodeId) -> Option<&'static str> {
+        let AstKind::CallExpression(c) = self.kind(call) else { return None };
+        let Expression::StaticMemberExpression(m) = &c.callee else { return None };
+        if self.expr_api(&m.object) != Some("observable") {
+            return None;
+        }
+        OBSERVABLE_VALUES.iter().find(|k| **k == m.property.name.as_str()).copied()
+    }
+
+    /// An observable box, Map or Set. The runtime tracks its reads and writes; they are not
+    /// analyzed (the value's own methods are not property accesses).
+    fn create_value_observable(&mut self, call_id: NodeId, kind: &'static str, options_index: usize) {
+        let AstKind::CallExpression(call) = self.kind(call_id) else { return };
+        let id = self.next_observable_id();
+        let span = self.span(call_id);
+        let options = call.arguments.get(options_index).map(|a| self.options(a));
+        let binding = self.resolve_result_binding(self.outer(call_id)).map(|(_, b)| b);
+        let what = match kind {
+            "box" => "Observable box",
+            "map" => "Observable Map",
+            _ => "Observable Set",
+        };
+        self.diagnose(
+            "opaque-observable",
+            "info",
+            format!("{what}: its reads and writes are tracked by the runtime but not analyzed."),
+            span,
+            vec![id.clone()],
+        );
+        self.observables.push(ir::Observable {
+            kind: "Observable",
+            id,
+            source: "observable",
+            target: Target::Object { binding },
+            shape: match kind {
+                "box" => Shape::Box,
+                "map" => Shape::Map,
+                _ => Shape::Set,
+            },
+            options,
+            span,
+        });
     }
 
     fn visit_make_observable_call(&mut self, call_id: NodeId, api: &'static str) {
@@ -514,12 +607,14 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             }
             None => Shape::Unknown,
         };
-        if let Some(value) = call.arguments.first().filter(|v| object.is_none() && is_collection(v)) {
+        if let Some(value) =
+            call.arguments.first().filter(|v| object.is_none() && matches!(v, Argument::ArrayExpression(_)))
+        {
             let value_span = self.span_of(value.span());
             self.diagnose(
                 "observable-collection",
                 "error",
-                "Observable arrays, Maps and Sets are not supported yet; use a plain object.".to_string(),
+                "Observable arrays are not supported yet; use a plain object, a Map or a Set.".to_string(),
                 value_span,
                 vec![id.clone()],
             );
@@ -1079,7 +1174,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             };
             if let Some(node) = fn_node {
                 // `action` runs untracked; `autoAction` and plain functions run tracked.
-                let untracked = matches!(annotation, Some(Annotation::Action { .. }));
+                let untracked = matches!(annotation, Some(Annotation::Action { .. } | Annotation::Flow { .. }));
                 self.member_fns.insert(format!("{observable}|{}", m.key), (node, untracked));
             }
         }
@@ -1137,17 +1232,22 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 });
                 member.computed = Some(id);
             }
-            Annotation::Action { bound } | Annotation::AutoAction { bound } => {
+            Annotation::Action { bound } | Annotation::AutoAction { bound } | Annotation::Flow { bound } => {
                 if let Some(Value_::Expr(Expression::CallExpression(c))) = m.value
                     && let Some(existing) = self.action_calls.get(&c.node_id())
                 {
                     member.action = Some(existing.clone());
                     return;
                 }
+                let is_flow = matches!(annotation, Annotation::Flow { .. });
                 if m.member_kind == "getter"
-                    || (m.member_kind == "field" && m.value_kind != "function" && m.value_kind != "unknown")
+                    || (m.member_kind == "field" && !matches!(m.value_kind, "function" | "generator" | "unknown"))
                 {
                     invalid(self, format!("\"{}\" is not a function; it cannot be an action.", m.key));
+                    return;
+                }
+                if is_flow && !matches!(m.value_kind, "generator" | "unknown") {
+                    invalid(self, format!("\"{}\" must be a generator function to be a flow.", m.key));
                     return;
                 }
                 let id = format!("action:{}", self.actions.len());
@@ -1165,7 +1265,11 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                         vec![id.clone()],
                     );
                 }
-                let kind = if matches!(annotation, Annotation::Action { .. }) { "action" } else { "autoAction" };
+                let kind = match annotation {
+                    Annotation::Action { .. } => "action",
+                    Annotation::Flow { .. } => "flow",
+                    _ => "autoAction",
+                };
                 self.actions.push(ir::Action {
                     kind: "Action",
                     id: id.clone(),
@@ -1180,21 +1284,6 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                     span: m.span,
                 });
                 member.action = Some(id);
-            }
-            Annotation::Flow { .. } => {
-                // Explicit `flow` references are already reported at the reference.
-                if member.annotation_source == Some("inferred") {
-                    self.diagnose(
-                        "unsupported-api",
-                        "error",
-                        format!(
-                            "\"{}\" is a generator and would be inferred as a flow, which is not supported by sobx yet.",
-                            m.key
-                        ),
-                        m.span,
-                        vec![observable.into()],
-                    );
-                }
             }
             Annotation::Unknown => invalid(self, format!("Could not resolve the annotation for \"{}\".", m.key)),
             Annotation::Excluded => {}
@@ -1238,6 +1327,39 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 data: None,
                 effect: None,
                 body: Some(body),
+                predicate: None,
+                options,
+                dependencies: vec![],
+                indirect_dependencies: vec![],
+                disposer_used,
+                span,
+            });
+            return;
+        }
+
+        if api == "when" {
+            let Some(predicate) = expr(0) else {
+                self.diagnose("invalid-arguments", "error", "when() expects a predicate function.".into(), span, vec![]);
+                return;
+            };
+            let predicate = self.function_ref(predicate, Role::Tracked(id.clone()));
+            if let FunctionRef::Opaque { span } = predicate {
+                self.opaque("when() predicate", span, &id);
+            }
+            // when(predicate, effect, options?) or when(predicate, options?) (the promise form).
+            let (effect, options_arg) = match call.arguments.get(1) {
+                Some(Argument::ObjectExpression(_)) | None => (None, call.arguments.get(1)),
+                Some(_) => (expr(1).map(|e| self.function_ref(e, Role::Effect(id.clone()))), call.arguments.get(2)),
+            };
+            let options = options_arg.map(|a| self.options(a));
+            self.reactions.push(ir::Reaction {
+                kind: "Reaction",
+                id,
+                api: "when",
+                data: None,
+                effect,
+                body: None,
+                predicate: Some(predicate),
                 options,
                 dependencies: vec![],
                 indirect_dependencies: vec![],
@@ -1270,6 +1392,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             data: Some(data),
             effect: Some(effect),
             body: None,
+            predicate: None,
             options,
             dependencies: vec![],
             indirect_dependencies: vec![],
@@ -1361,6 +1484,18 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         };
         let binding = self.resolve_result_binding(self.outer(call_id)).map(|(_, b)| b);
         let id = self.create_action(call_id, body, ActionSource::Action { name, binding }, "action");
+        self.action_calls.insert(call_id, id);
+    }
+
+    fn visit_flow_call(&mut self, call_id: NodeId) {
+        let AstKind::CallExpression(call) = self.kind(call_id) else { return };
+        let Some(body) = call.arguments.first().and_then(|a| a.as_expression()) else {
+            let s = self.span(call_id);
+            self.diagnose("invalid-arguments", "error", "flow() expects a generator function.".into(), s, vec![]);
+            return;
+        };
+        let binding = self.resolve_result_binding(self.outer(call_id)).map(|(_, b)| b);
+        let id = self.create_action(call_id, body, ActionSource::Flow { binding }, "flow");
         self.action_calls.insert(call_id, id);
     }
 
@@ -2657,14 +2792,21 @@ fn option_value(expr: &Expression) -> Value {
     }
 }
 
-/// An array literal or `new Map/Set/WeakMap/WeakSet(...)`.
-fn is_collection(arg: &Argument<'_>) -> bool {
-    match arg {
-        Argument::ArrayExpression(_) => true,
-        Argument::NewExpression(n) => matches!(
-            &n.callee,
-            Expression::Identifier(id) if matches!(id.name.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet")
-        ),
-        _ => false,
+/// `new Map(...)` / `new Set(...)`: the kind of observable collection it makes.
+fn collection_kind(arg: &Argument<'_>) -> Option<&'static str> {
+    let Argument::NewExpression(n) = arg else { return None };
+    let Expression::Identifier(id) = &n.callee else { return None };
+    match id.name.as_str() {
+        "Map" => Some("map"),
+        "Set" => Some("set"),
+        _ => None,
+    }
+}
+
+fn observable_value_key(kind: &str) -> &'static str {
+    match kind {
+        "box" => "observable.box",
+        "map" => "observable.map",
+        _ => "observable.set",
     }
 }

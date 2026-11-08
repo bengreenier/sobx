@@ -170,8 +170,9 @@ function fastPathBlocker(o: SobxModule["observables"][number]): string | null {
 		const a = m.annotation;
 		if (m.annotationSource === "explicit") return "has annotation overrides";
 		if (!a) continue;
-		if (a.kind === "observable" && a.modifier === "struct") {
-			return `"${m.key}" is observable.struct`;
+		// ProxyLike values are deep (Maps / Sets become observable) and compared with Object.is.
+		if (a.kind === "observable" && a.modifier !== "deep") {
+			return `"${m.key}" is observable.${a.modifier}`;
 		}
 		if ((a.kind === "action" || a.kind === "autoAction") && a.bound) {
 			return `"${m.key}" is bound`;

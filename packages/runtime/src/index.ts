@@ -1,3 +1,19 @@
+export {
+	type CancellablePromise,
+	FlowCancellationError,
+	type FlowPromise,
+	isFlowCancellationError,
+	type WhenOptions,
+	when,
+} from "./async.js";
+export {
+	type BoxOptions,
+	type CollectionOptions,
+	comparer,
+	ObservableBox,
+	ObservableMap,
+	ObservableSet,
+} from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
 export { batch, untracked } from "./core.js";
 export {
@@ -9,6 +25,9 @@ export {
 	action,
 	type ComputedFn,
 	computed,
+	type FlowAnnotation,
+	type FlowFn,
+	flow,
 	type GetterAnnotation,
 	type MethodAnnotation,
 	makeAutoObservable,

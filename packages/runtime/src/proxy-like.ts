@@ -1,3 +1,4 @@
+import { enhance } from "./collections.js";
 import { batch, Dep, type Equals, globalState, reportChanged } from "./core.js";
 
 /** Options for {@link ProxyLike}. Emitted by the sobx compiler. */
@@ -6,6 +7,8 @@ export interface ProxyLikeOptions<T> {
 	getters?: Array<keyof T>;
 	/** Function-valued keys to wrap as actions: their writes are batched. */
 	actions?: Array<keyof T>;
+	/** Make plain Map / Set values observable, like MobX's deep observables. Default `true`. */
+	deep?: boolean;
 }
 
 /**
@@ -64,9 +67,21 @@ export class ProxyLike<T extends object> {
 	private readonly getters: Set<keyof T> | undefined;
 	/** Per-key equality (`observable.struct`); `Object.is` otherwise. */
 	private equalsByKey: Map<keyof T, Equals> | undefined;
+	private readonly deep: boolean;
 
 	constructor(target: T, options?: ProxyLikeOptions<T>) {
 		this.target = target;
+		this.deep = options?.deep ?? true;
+		if (this.deep) {
+			const record = target as Record<keyof T, unknown>;
+			for (const key of Object.keys(target) as Array<keyof T>) {
+				// Data properties only: reading a getter here would run it with the wrong `this`.
+				const value = Object.getOwnPropertyDescriptor(target, key)?.value;
+				if (typeof value === "object" && value !== null) {
+					record[key] = enhance(value);
+				}
+			}
+		}
 		if (options?.getters?.length) this.getters = new Set(options.getters);
 		if (options?.actions) {
 			const record = target as Record<keyof T, unknown>;
@@ -176,6 +191,9 @@ export class ProxyLike<T extends object> {
 	 * @returns `value`, so compiled assignment expressions keep their value.
 	 */
 	set<K extends keyof T>(key: K, value: T[K]): T[K] {
+		if (this.deep && typeof value === "object" && value !== null) {
+			value = enhance(value);
+		}
 		const previous = this.target[key];
 		this.target[key] = value;
 

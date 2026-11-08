@@ -30,20 +30,25 @@ code imports it.
 | `runInAction(fn)` | Yes | |
 | `makeObservable(this, annotations, options?)` | Yes | Runtime. |
 | `makeAutoObservable(this, overrides?, options?)` | Yes | Runtime. Getters become computeds, functions become auto-actions. |
-| Annotations: `observable`, `observable.ref` / `.shallow` / `.struct` / `.deep`, `computed`, `computed.struct`, `action`, `action.bound`, `false` | Yes | |
-| Standard decorators: `@observable accessor x`, `@computed get x()`, `@action m()`, `@action.bound m()` | Yes | Your toolchain must transform standard (2022.3) decorators, e.g. esbuild with `target: "es2022"`. |
+| `when(predicate, effect, options?)`, `when(predicate, options?)` (promise) | Yes | The promise has `cancel()`. Options: `timeout`, `name`. |
+| `flow(function* () {...})` | Yes | Each step between `yield`s runs as an action; the returned promise has `cancel()`. Generator methods are inferred as flows by `makeAutoObservable` / `observable()`. |
+| `observable.box(value, options?)` | Yes | `get()` / `set()`. Options: `equals`, `deep`, `name`. Runtime (reads and writes are not analyzed). |
+| `observable.map()`, `observable(new Map())`, `observable.set()`, `observable(new Set())` | Yes | Runtime (reads and writes are not analyzed). Options: `deep`, `name`. |
+| `comparer.default` / `.identity` / `.structural` / `.shallow` | Yes | For `equals` options. |
+| Annotations: `observable`, `observable.ref` / `.shallow` / `.struct` / `.deep`, `computed`, `computed.struct`, `action`, `action.bound`, `flow`, `flow.bound`, `false` | Yes | |
+| Standard decorators: `@observable accessor x`, `@computed get x()`, `@action m()`, `@action.bound m()`, `@flow *m()` | Yes | Your toolchain must transform standard (2022.3) decorators, e.g. esbuild with `target: "es2022"`. |
 | Legacy (`experimentalDecorators`) decorators, `@observable x` without `accessor` | No | Error (`invalid-annotation`). |
-| `when`, `flow`, generator actions | No | Error (`unsupported-api`). |
-| `observable.box`, `observable.array` / `.map` / `.set`, `extendObservable`, `toJS`, `comparer`, `untracked`, `configure`, `observe`, `intercept`, ... | No | Error (`unsupported-api` / `unknown-import`). |
-| Unknown reaction / computed / observable options (e.g. `delay`, `scheduler`, `onError`) | No | Error (`unsupported-option`). |
+| `observable.array`, `extendObservable`, `toJS`, `untracked`, `configure`, `observe`, `intercept`, ... | No | Error (`unsupported-api` / `unknown-import`). |
+| Other options (e.g. `delay`, `scheduler`, `onError`) | No | Error (`unsupported-option`). |
 
 ## Values
 
 | Pattern | Outcome |
 |---|---|
 | Plain objects | Supported. |
-| Observable arrays, Maps, Sets (`observable([])`, `observable(new Map())`) | Error (`observable-collection`); also thrown by the runtime. |
-| Nested values (`store.user.name = "x"`, `store.items.push(x)`) | Error (`deep-mutation`). sobx observables are **shallow**: replace the value instead (`store.items = [...store.items, x]`). Reads of nested values are fine. |
+| Maps and Sets | Supported, including as property values: like MobX, a plain Map or Set stored in an observable property (or box, Map, Set) becomes observable, unless the property is `observable.ref` / `.struct`. |
+| Observable arrays (`observable([])`) | Error (`observable-collection`); also thrown by the runtime. |
+| Nested plain objects and arrays (`store.user.name = "x"`, `store.items.push(x)`) | Error (`deep-mutation`). They are not made observable: replace the value instead (`store.items = [...store.items, x]`), or use a Map / Set. Reads of nested values are fine. |
 
 ## Using an observable object
 
@@ -59,7 +64,7 @@ For a local `const s = observable({...})`:
 | `s.method()`, `s.method?.()` | Fast path: `s.get("method").call(s)`; `this.x` inside the method is compiled too. Methods are batched. |
 | Getters (`get total() {...}`) | Fast path: run with the `ProxyLike` as `this` (tracked, not cached). |
 | Exported, passed to a function, aliased (`const t = s`), returned, spread, `Object.keys(s)`, `"a" in s`, dynamic keys (`s[k]`), writes in destructuring patterns, `observable()` not stored in a variable, reassigned bindings | Runtime |
-| Setters, `observable.struct` / bound / excluded members, annotation overrides, options | Runtime |
+| Setters, `observable.ref` / `.shallow` / `.struct` / bound / excluded members, annotation overrides, options | Runtime |
 | `...rest` in a destructuring of `s` | Runtime |
 
 Why an observable went to the runtime is reported as an info diagnostic (`runtime-observable`),
@@ -78,9 +83,10 @@ returned by `transformSobx` and not printed by the bundler plugins.
 
 ## Differences from MobX
 
-- Observables are shallow (see above). `deep: true` (the default) is accepted, but nested
-  objects are not made observable.
-- No arrays, Maps, Sets, boxes or flows.
+- Nested plain objects and arrays are not made observable (see above); Maps and Sets are.
+- No observable arrays.
+- `when` without an effect rejects with `Error("WHEN_TIMEOUT")` / `Error("WHEN_CANCELLED")`;
+  a cancelled flow rejects with a `FlowCancellationError` (`isFlowCancellationError(e)`).
 - Getters on fast-path objects are not cached (they are re-run when read); computeds created
   with `computed()`, `makeObservable` / `makeAutoObservable` or `@computed` are cached.
 - `autoAction` members are batched but not untracked.
