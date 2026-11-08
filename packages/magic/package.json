@@ -32,7 +32,9 @@
 		"build:lib": "vite build",
 		"lint": "biome check ."
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@sobx/runtime": "workspace:*"
+	},
 	"peerDependencies": {
 		"@sobx/compiler": "workspace:*"
 	}

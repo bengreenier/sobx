@@ -1,17 +1,33 @@
+export {
+	type CompileDiagnostic,
+	type CompileDiagnosticCode,
+	type CompilerDiagnosticCode,
+	type CompileSeverity,
+	compileDiagnostics,
+	DEFAULT_SEVERITY,
+	type DiagnosticsConfig,
+	formatDiagnostic,
+} from "./diagnostics.js";
 export { type AnalyzeOptions, analyze } from "./native.js";
 export {
-	buildReactionExpression,
 	type CompilePlan,
+	finalizePlan,
+	type ProxyObservable,
 	planFromModule,
-	type ReactionRead,
+	RUNTIME_MODULE,
 } from "./plan.js";
 export type { SobxCompilerOptions } from "./plugin.js";
 export { sobxCompiler } from "./plugin.js";
-export type { TransformSobxOptions } from "./transform.js";
 export {
+	type CompileUnit,
+	compileUnit,
 	DEFAULT_MODULE_SPECIFIER,
-	ensureImports,
-	planSource,
+	SobxCompileError,
+	type TransformSobxOptions,
 	transformSobx,
 } from "./transform.js";
-export { SobxTransformer } from "./transformers/sobx.js";
+export {
+	PARSER_PLUGINS,
+	SobxTransformer,
+	type SobxTransformerOptions,
+} from "./transformers/sobx.js";

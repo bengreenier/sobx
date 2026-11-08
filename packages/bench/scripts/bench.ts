@@ -15,7 +15,7 @@ import vm from "node:vm";
 import generate from "@babel/generator";
 import { parse } from "@babel/parser";
 import { transformSobx } from "@sobx/compiler";
-import { ProxyLike } from "@sobx/runtime";
+import * as sobxRuntime from "@sobx/runtime";
 import { configure, observable, reaction, runInAction } from "mobx";
 
 configure({ enforceActions: "always" });
@@ -82,7 +82,7 @@ function stripDeclareIterations(code: string): string {
 	);
 }
 
-/** Remove ESM import of @sobx/runtime so we can run in vm with ProxyLike in context. */
+/** Remove ESM imports of @sobx/runtime so we can run in vm with the runtime in context. */
 function stripSobxImport(code: string): string {
 	return code.replace(
 		/import\s*\{[^}]*\}\s*from\s*["']@sobx\/runtime["'];?\s*\n?/g,
@@ -114,8 +114,7 @@ function runSobx(basename: string, iterations: number): number {
 		stripSobxImport(stripMobxImport(compiled)),
 	);
 	const context = {
-		ProxyLike,
-		runInAction: (fn: () => void) => fn(),
+		...sobxRuntime,
 		console: { log: () => {} },
 		iterations,
 		Math: globalThis.Math,

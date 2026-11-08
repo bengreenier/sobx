@@ -24,6 +24,7 @@ export default defineConfig({
 				/^node:/,
 				"@sobx/ast",
 				"@sobx/runtime",
+				"ast-kit",
 				"unplugin",
 				"unplugin-ast",
 				"unplugin-ast/vite",

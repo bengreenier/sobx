@@ -21,7 +21,7 @@ pnpm add @sobx/ast
 
 ## The IR
 
-Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `action`, `runInAction`. Recognized but not yet modeled: `flow`, `when`.
+Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `action`, `runInAction`. Recognized but not yet modeled: `flow`, `when`. Observable arrays, Maps and Sets (`observable([])`, `observable(new Map())`) are reported (`observable-collection`) rather than modeled.
 
 A `SobxModule` contains:
 

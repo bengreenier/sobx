@@ -514,6 +514,16 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             }
             None => Shape::Unknown,
         };
+        if let Some(value) = call.arguments.first().filter(|v| object.is_none() && is_collection(v)) {
+            let value_span = self.span_of(value.span());
+            self.diagnose(
+                "observable-collection",
+                "error",
+                "Observable arrays, Maps and Sets are not supported yet; use a plain object.".to_string(),
+                value_span,
+                vec![id.clone()],
+            );
+        }
 
         let outer = self.outer(call_id);
         let resolved = self.resolve_result_binding(outer);
@@ -2644,5 +2654,17 @@ fn option_value(expr: &Expression) -> Value {
         Expression::BooleanLiteral(b) => json!({ "kind": "literal", "value": b.value }),
         Expression::NullLiteral(_) => json!({ "kind": "literal", "value": null }),
         _ => json!({ "kind": "unknown" }),
+    }
+}
+
+/// An array literal or `new Map/Set/WeakMap/WeakSet(...)`.
+fn is_collection(arg: &Argument<'_>) -> bool {
+    match arg {
+        Argument::ArrayExpression(_) => true,
+        Argument::NewExpression(n) => matches!(
+            &n.callee,
+            Expression::Identifier(id) if matches!(id.name.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet")
+        ),
+        _ => false,
     }
 }

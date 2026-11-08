@@ -2,7 +2,9 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-Lightweight observable proxy runtime for sobx. Code compiled by `@sobx/compiler` imports it. Tracks property changes via explicit `get` / `set` calls and notifies observers—faster than a native `Proxy` by avoiding trap overhead.
+The runtime that sobx-compiled code runs on: a small, MobX-compatible reactive core. The [compiler](../compiler) redirects `@sobx/magic` imports here, and compiles local observable objects to `ProxyLike` instances.
+
+You normally don't import it yourself; write against [`@sobx/magic`](../magic) and let the compiler point your code here. See [what's supported](../../docs/support.md).
 
 ## Install
 
@@ -10,37 +12,46 @@ Lightweight observable proxy runtime for sobx. Code compiled by `@sobx/compiler`
 pnpm add @sobx/runtime
 ```
 
+## How it works
+
+- **Dependency tracking.** While a computed or reaction runs, every observable read is recorded; afterwards it depends on exactly those (re-tracked on every run, so conditional reads work).
+- **Batching.** Actions (`action`, `runInAction`, and methods of observables) batch their writes: reactions run once, when the outermost action ends.
+- **Computeds** are cached while observed, and only propagate when their value changes.
+- **Observable objects** are shallow: plain property values are observed, nested objects and arrays are not.
+
 ## API
 
-### `ProxyLike<T>`
+MobX-compatible:
 
-Wraps a plain object and notifies observers when properties change. Use `.get(key)` and `.set(key, value)` instead of direct property access.
+- **`observable(object, overrides?, options?)`**: an observable copy of a plain object (getters become computeds, functions auto-actions). Throws for arrays, Maps, Sets and class instances.
+- **`computed(fn, options?)`**: a computed value; read it with `.get()`. Options: `equals`.
+- **`reaction(data, effect, options?)`**: runs `effect(value, previous, reaction)` when `data`'s result changes. Options: `fireImmediately`, `equals`. Returns a disposer.
+- **`autorun(fn)`**: runs `fn` now and whenever what it read changes. Returns a disposer.
+- **`action(fn)`** / **`action(name, fn)`**, **`runInAction(fn)`**: batched, untracked.
+- **`makeObservable(target, annotations, options?)`**, **`makeAutoObservable(target, overrides?, options?)`**: for classes (call them in the constructor) and objects. Options: `autoBind`.
+- **Annotations**: `observable`, `observable.ref` / `.shallow` / `.deep` / `.struct` (structural comparison), `computed`, `computed.struct`, `action`, `action.bound`, `false` (excluded), `true` (inferred).
+- **Standard decorators**: `@observable accessor x`, `@computed get x()`, `@action m()`, `@action.bound m()`.
 
-- **`constructor(target: T)`** — Wrap an object.
-- **`get(key)`** — Read a property.
-- **`set(key, value)`** — Write a property and notify observers.
-- **`addObserver(observer)`** — Observe all keys. Callback: `(key, previous, current) => void`.
-- **`addObserver(key, observer)`** — Observe a single key.
-- **`dispose()`** — On the handle returned by `addObserver`, stops observing.
+Also:
 
-### Types
+- **`untracked(fn)`**, **`batch(fn)`**.
+- **`ProxyLike`**: see below.
 
-- **`ProxyLikeObserver<T>`** — `(key, previous, current) => void`
-- **`ProxyLikeObserverHandle`** — `{ dispose(): void }`
+## `ProxyLike`
 
-## Example
+The compiled form of a local observable object: a wrapper with explicit `get` / `set` calls, faster than accessors or a native `Proxy`. Reads inside computeds and reactions are tracked; writes that change a value re-run them.
+
+- **`new ProxyLike(target, options?)`**: wrap an object. Options (emitted by the compiler): `getters` (run with the `ProxyLike` as `this`), `actions` (function keys to batch).
+- **`get(key)`**, **`set(key, value)`** (returns `value`), **`update(key, ±1, prefix)`** (for `++` / `--`), **`delete(key)`**.
+- **`addObserver(observer)`** / **`addObserver(key, observer)`**: low-level change callbacks, `(key, previous, current) => void`, called on every `set` (even with an equal value). Returns a handle with `dispose()`.
 
 ```ts
-import { ProxyLike } from "@sobx/runtime";
+import { ProxyLike, reaction } from "@sobx/runtime";
 
-const state = { count: 0 };
-const proxy = new ProxyLike(state);
-
-proxy.addObserver((key, prev, curr) => {
-  console.log(`${String(key)}: ${prev} -> ${curr}`);
-});
-
-proxy.set("count", 1); // logs: count: 0 -> 1
-console.log(proxy.get("count")); // 1
+const state = new ProxyLike({ count: 0 });
+reaction(
+  () => state.get("count"),
+  (count) => console.log("count:", count),
+);
+state.set("count", 1); // logs: count: 1
 ```
-

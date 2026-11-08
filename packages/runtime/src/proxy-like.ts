@@ -1,3 +1,13 @@
+import { batch, Dep, type Equals, globalState, reportChanged } from "./core.js";
+
+/** Options for {@link ProxyLike}. Emitted by the sobx compiler. */
+export interface ProxyLikeOptions<T> {
+	/** Getter keys; they run with the `ProxyLike` as `this` (so their reads are tracked). */
+	getters?: Array<keyof T>;
+	/** Function-valued keys to wrap as actions: their writes are batched. */
+	actions?: Array<keyof T>;
+}
+
 /**
  * Callback invoked when an observed property changes on a {@link ProxyLike} instance.
  *
@@ -25,7 +35,8 @@ export interface ProxyLikeObserverHandle {
  * Provides an observable proxy-like interface for an object.
  *
  * Tracks property changes via explicit {@link ProxyLike.get} / {@link ProxyLike.set} calls
- * and notifies registered observers. This is significantly faster than using a native
+ * and notifies registered observers. Reads made while a computed or reaction runs are
+ * tracked as its dependencies, and writes that change a value re-run those derivations. This is significantly faster than using a native
  * {@link Proxy} because it avoids trap overhead, but requires you to use the get/set
  * methods instead of direct property access.
  *
@@ -48,9 +59,47 @@ export class ProxyLike<T extends object> {
 		new Map();
 
 	protected readonly target: T;
+	/** Per-key dependency slots, created on first tracked read. */
+	private deps: Map<keyof T, Dep> | undefined;
+	private readonly getters: Set<keyof T> | undefined;
+	/** Per-key equality (`observable.struct`); `Object.is` otherwise. */
+	private equalsByKey: Map<keyof T, Equals> | undefined;
 
-	constructor(target: T) {
+	constructor(target: T, options?: ProxyLikeOptions<T>) {
 		this.target = target;
+		if (options?.getters?.length) this.getters = new Set(options.getters);
+		if (options?.actions) {
+			const record = target as Record<keyof T, unknown>;
+			for (const key of options.actions) {
+				const fn = record[key];
+				if (typeof fn !== "function") continue;
+				record[key] = function (this: unknown, ...args: unknown[]) {
+					return batch(() => fn.apply(this, args));
+				};
+			}
+		}
+	}
+
+	private observe(key: keyof T): void {
+		this.deps ??= new Map();
+		let dep = this.deps.get(key);
+		if (!dep) {
+			dep = new Dep();
+			this.deps.set(key, dep);
+		}
+		// biome-ignore lint/style/noNonNullAssertion: only called while tracking
+		globalState.tracking!.deps.add(dep);
+	}
+
+	/** @internal Use `equals` instead of `Object.is` to decide whether `key` changed. */
+	setEquals(key: keyof T, equals: Equals): void {
+		this.equalsByKey ??= new Map();
+		this.equalsByKey.set(key, equals);
+	}
+
+	/** @internal Set an initial value without notifying anyone. */
+	init(key: keyof T, value: T[keyof T]): void {
+		this.target[key] = value;
 	}
 
 	/**
@@ -112,7 +161,9 @@ export class ProxyLike<T extends object> {
 	 * @param key - The property key to read.
 	 * @returns The current value of that property.
 	 */
-	get(key: keyof T) {
+	get<K extends keyof T>(key: K): T[K] {
+		if (globalState.tracking !== null) this.observe(key);
+		if (this.getters?.has(key)) return Reflect.get(this.target, key, this);
 		return this.target[key];
 	}
 
@@ -122,8 +173,9 @@ export class ProxyLike<T extends object> {
 	 * @typeParam K - The property key type (narrowed from keyof T).
 	 * @param key - The property key to set.
 	 * @param value - The new value (must be assignable to T[K]).
+	 * @returns `value`, so compiled assignment expressions keep their value.
 	 */
-	set<K extends keyof T>(key: K, value: T[K]): void {
+	set<K extends keyof T>(key: K, value: T[K]): T[K] {
 		const previous = this.target[key];
 		this.target[key] = value;
 
@@ -133,5 +185,34 @@ export class ProxyLike<T extends object> {
 		this.globalObservers.forEach((observer) => {
 			observer(key, previous, value);
 		});
+
+		const dep = this.deps?.get(key);
+		if (dep) {
+			const equals = this.equalsByKey?.get(key) ?? Object.is;
+			if (!equals(previous, value)) reportChanged(dep);
+		}
+		return value;
+	}
+
+	/**
+	 * Adds `delta` to a numeric property, like `++` / `--`.
+	 *
+	 * @returns The new value when `prefix`, otherwise the previous one.
+	 */
+	update<K extends keyof T>(key: K, delta: 1 | -1, prefix: boolean): unknown {
+		const previous = this.get(key) as unknown as number | bigint;
+		const next =
+			typeof previous === "bigint"
+				? previous + BigInt(delta)
+				: Number(previous) + delta;
+		this.set(key, next as T[K]);
+		return prefix ? next : typeof previous === "bigint" ? previous : +previous;
+	}
+
+	/** Deletes a property and notifies observers, like `delete target[key]`. */
+	delete<K extends keyof T>(key: K): boolean {
+		if (!Object.hasOwn(this.target, key)) return true;
+		this.set(key, undefined as T[K]);
+		return delete this.target[key];
 	}
 }

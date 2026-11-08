@@ -2,13 +2,16 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-Compiles sobx usage: rewrites `observable`, property access, `reaction`, and `runInAction` imported from a configurable module (default `"@sobx/magic"`) into code that uses `@sobx/runtime`. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack.
+Compiles MobX-style code written against `@sobx/magic` (or another configured module) to run on `@sobx/runtime`, with local observable objects compiled to explicit `get` / `set` calls. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack. See [what's supported](../../docs/support.md).
 
 ## Install
 
 ```bash
-pnpm add @sobx/compiler
+pnpm add -D @sobx/compiler
+pnpm add @sobx/magic @sobx/runtime
 ```
+
+Compiled code imports `@sobx/runtime`, so it must be a (non-dev) dependency of your app.
 
 ## Bundler plugins
 
@@ -29,6 +32,9 @@ Each entry exports a `sobxCompiler(options?)` function. Only files that import f
 - **`include`** — Pattern(s) for files to transform. Default: `/\.[jt]sx?$/`
 - **`exclude`** — Pattern(s) to skip. Always merged with `/node_modules/` (parsing deps via Babel is very slow).
 - **`moduleSpecifier`** — Module to treat as sobx (only transform imports from here). Default: `"@sobx/magic"`
+- **`diagnostics`** — Per-code severity overrides, e.g. `{ "deep-mutation": "warning" }`. `"error"` fails the build, `"warning"` is logged, `"info"` and `"off"` are silent. Defaults are in `DEFAULT_SEVERITY`.
+
+Standard decorators (`@observable accessor x`) are parsed; your bundler must also transform them for your target (for example esbuild with `target: "es2022"`).
 
 ### Vite
 
@@ -96,15 +102,13 @@ export default {
 
 ## How it works
 
-Each file is analyzed by the sobx analyzer, a native (Rust / [oxc](https://oxc.rs)) addon that produces the IR described by [`@sobx/ast`](../ast). The compiler rewrites exactly what the analysis identifies:
+1. **Analyze.** Each file that mentions the module specifier is analyzed by the sobx analyzer, a native (Rust / [oxc](https://oxc.rs)) addon that produces the IR described by [`@sobx/ast`](../ast).
+2. **Report.** The analyzer's diagnostics are re-graded for compiling, and the compiler adds its own (unsupported options, observables left to the runtime). Errors fail the build, with every error listed (`file:line:col - error code: message`); warnings are logged.
+3. **Rewrite.**
+   - Imports from the module specifier are redirected to `@sobx/runtime`, which implements the whole supported API (`observable`, `computed`, `reaction`, `autorun`, `action`, `runInAction`, `makeObservable`, `makeAutoObservable`, annotations and decorators).
+   - Local `observable({...})` objects whose every use can be rewritten (the fast path) become a `ProxyLike`: reads become `s.get("k")`, writes `s.set("k", v)`, `++` / `--` `s.update(...)`, `delete` `s.delete(...)`, destructuring and method calls (`s.get("m").call(s)`) too, and `this.k` inside their methods. Everything else (exported or escaping objects, dynamic keys, classes, ...) is left to the runtime, which makes it observable with accessors.
 
-- **`observable({...})`** → `new ProxyLike({...})`, plus `import { ProxyLike } from "@sobx/runtime"`.
-- **Reads** of those observables' properties (`store.count`) → `store.get("count")`.
-- **Writes** (`store.count = v`, `store.count += v`, `store.count++`) → `store.set("count", ...)`.
-- **`reaction(data, effect)`** → an `addObserver` per key the data function reads, including reads in local functions and observable methods it calls.
-- **`runInAction(fn)`** → `fn()`.
-
-Names are resolved through scopes, so a parameter or local variable that shadows an observable, or a function named `observable` that isn't imported from the API module, is left alone. Classes (`makeObservable` / `makeAutoObservable`) and the other APIs are analyzed but not compiled yet.
+Names are resolved through scopes, so a parameter or local variable that shadows an observable, or a function named `observable` that isn't imported from the API module, is left alone.
 
 ### Native analyzer
 
@@ -122,11 +126,11 @@ pnpm --filter @sobx/compiler build:native   # writes sobx-compiler.node (git-ign
 
 ## Programmatic API
 
-- **`analyze(source, options?)`**: run the native analyzer and return the module's IR (`SobxModule`). Options: `moduleSpecifier`, `filename`.
-- **`transformSobx(program, source, options?)`**: compile a Babel `Program`. `source` must be the text it was parsed from, since nodes are matched to the analysis by offset. Returns `{ ast, needsProxyLike, needsReaction }`.
-- **`planSource(source, options?)`** / **`planFromModule(ir)`**: what the compiler would rewrite, keyed by source span.
-- **`SobxTransformer(moduleSpecifier?)`**: the unplugin-ast transformer used by the bundler plugins.
-- **`buildReactionExpression`, `ensureImports`**: helpers used by the compiler.
+- **`transformSobx(program, source, options?)`**: compile a Babel `Program`. `source` must be the text it was parsed from, since nodes are matched to the analysis by offset. Returns `{ ast, diagnostics, needsProxyLike }`; it doesn't throw on error diagnostics. Options: `moduleSpecifier`, `filename`, `diagnostics`.
+- **`analyze(source, options?)`**: run the native analyzer and return the module's IR (`SobxModule`).
+- **`compileUnit(program, source, options?)`**: the plan and diagnostics for a module, without rewriting.
+- **`compileDiagnostics`**, **`formatDiagnostic`**, **`DEFAULT_SEVERITY`**, **`SobxCompileError`**: diagnostics helpers.
+- **`SobxTransformer(options?)`** and **`PARSER_PLUGINS`**: the unplugin-ast transformer used by the bundler plugins, and the Babel parser plugins it needs.
 
 ## Development
 

@@ -7,5 +7,7 @@ await esbuild.build({
 	outfile: "dist/index.js",
 	format: "esm",
 	platform: "node",
+	// Lower standard decorators (Node does not run them natively yet).
+	target: "es2022",
 	plugins: [sobxCompiler()],
 });

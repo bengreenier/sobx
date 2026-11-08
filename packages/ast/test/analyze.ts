@@ -633,6 +633,16 @@ class ModuleAnalyzer {
 					span,
 				)
 			: { kind: "unknown" };
+		const value = call.node.arguments[0];
+		if (!object && value && isCollection(value)) {
+			this.diagnose(
+				"observable-collection",
+				"error",
+				"Observable arrays, Maps and Sets are not supported yet; use a plain object.",
+				toSpan(value),
+				[id],
+			);
+		}
 
 		const outer = outerExpression(call);
 		const resolved = resolveResultBinding(outer);
@@ -2366,6 +2376,18 @@ function propertyKey(key: t.Node, computed: boolean): AccessKey {
 }
 
 /** Parameter count, excluding a TypeScript `this:` parameter (not a runtime parameter). */
+const COLLECTION_CONSTRUCTORS = new Set(["Map", "Set", "WeakMap", "WeakSet"]);
+
+/** An array literal or `new Map/Set/WeakMap/WeakSet(...)`. */
+function isCollection(node: t.Node): boolean {
+	return (
+		t.isArrayExpression(node) ||
+		(t.isNewExpression(node) &&
+			t.isIdentifier(node.callee) &&
+			COLLECTION_CONSTRUCTORS.has(node.callee.name))
+	);
+}
+
 function runtimeParamCount(params: t.Function["params"]): number {
 	const first = params[0];
 	return t.isIdentifier(first, { name: "this" })

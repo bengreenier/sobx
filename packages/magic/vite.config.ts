@@ -9,5 +9,6 @@ export default defineConfig({
 			fileName: (format) =>
 				format === "es" || format === "esm" ? "magic.js" : "magic.cjs",
 		},
+		rollupOptions: { external: ["@sobx/runtime"] },
 	},
 });

@@ -2,66 +2,74 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-Virtual MobX-compatible API for use with the sobx compiler. **Do not call these at runtime**—they throw. The [@sobx/compiler](https://github.com/bengreenier/sobx/tree/main/packages/compiler) rewrites your code so that `observable`, `reaction`, and `runInAction` are replaced with compiled output.
+The MobX-compatible API you write sobx code against. Its exports are placeholders: the [@sobx/compiler](../compiler) redirects these imports to [`@sobx/runtime`](../runtime), which implements them, and compiles local observable objects to a faster form. If a placeholder is ever called, the compiler wasn't enabled for that file, and it throws to say so. The types are the runtime's, so code type-checks exactly as it runs.
 
-Use this package when migrating from MobX: keep the same API surface and switch your imports from `"mobx"` to `"@sobx/magic"`, then add the compiler to your build.
+## Migrating from MobX
 
-### What the compiler does
+Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to your build. Most MobX code that uses plain observable objects, classes (`makeObservable` / `makeAutoObservable` / standard decorators), `computed`, `reaction`, `autorun` and actions works unchanged.
 
-The compiler runs at build time and only transforms files that import from the configured module (default `"@sobx/magic"`). It analyzes each file with the sobx analyzer (native, scope-aware), then rewrites what the analysis identifies to use the minimal runtime in `@sobx/runtime`:
-
-- **`observable(value)`** → `new ProxyLike(value)` and injects `import { ProxyLike } from "@sobx/runtime"`.
-- **Property reads** on those observables (e.g. `store.count`) → `store.get("count")`.
-- **Property writes** (`store.count = 1`, `store.count += 1`, `store.count++`) → `store.set("count", ...)`.
-- **`reaction(dataFn, effectFn)`** → an `addObserver` on each key `dataFn` reads (including in functions it calls), plus one initial run of the effect. Options (such as `fireImmediately`) are not compiled yet.
-- **`runInAction(fn)`** → `fn()` (there is no separate action runtime).
-
-So your source stays MobX-style (observable, reaction, direct property access), and the published bundle uses explicit get/set and observers instead of a heavy runtime.
+It is **not a complete drop-in**. Observables are shallow, and arrays, Maps, Sets, boxes, `when` and `flow` aren't supported. The compiler fails the build on anything that wouldn't behave like MobX, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
 ## Install
 
 ```bash
-pnpm add @sobx/magic
+pnpm add @sobx/magic @sobx/runtime
+pnpm add -D @sobx/compiler
 ```
+
+`@sobx/runtime` must be a direct dependency: compiled code imports it from your own files.
 
 ## Exports
 
-- **`observable(value)`** — Marks a value as observable. Compiler replaces with proxy-backed code.
-- **`reaction(dataFn, effectFn, options?)`** — Runs `effectFn` when `dataFn`’s result changes. Compiler replaces with explicit tracking.
-- **`runInAction(fn)`** — Runs `fn` in an action. Compiler replaces it with `fn()`.
+- **`observable(object, overrides?, options?)`**, plus the `observable.ref` / `.shallow` / `.struct` / `.deep` annotations
+- **`computed(fn, options?)`**, plus `computed.struct`
+- **`reaction(data, effect, options?)`**, **`autorun(fn)`**
+- **`action(fn)`** / **`action(name, fn)`**, plus `action.bound`; **`runInAction(fn)`**
+- **`makeObservable(target, annotations, options?)`**, **`makeAutoObservable(target, overrides?, options?)`**
+- `observable`, `computed` and `action` also work as standard decorators: `@observable accessor x`, `@computed get x()`, `@action m()`.
 
-If any of these are ever executed without being compiled, they throw with a message telling you to enable the sobx compiler for that file.
+## What the compiler does
 
-## Usage
-
-1. Import from `"@sobx/magic"` instead of `"mobx"`.
-2. Add the sobx compiler to your bundler (Vite, Rollup, Webpack, esbuild, Rolldown, or Rspack). See `packages/compiler` in this repo.
+For a local object like the one below, the compiler produces explicit `get` / `set` calls on a `ProxyLike` instead of accessors, and imports everything else from `@sobx/runtime`:
 
 ```ts
 import { observable, reaction, runInAction } from "@sobx/magic";
 
 const store = observable({ count: 0 });
-
 reaction(
   () => store.count,
   (count) => console.log("count:", count),
-  { fireImmediately: true },
 );
-
 runInAction(() => {
   store.count += 1;
 });
 ```
 
+compiles to:
+
+```js
+import { observable, reaction, runInAction } from "@sobx/runtime";
+import { ProxyLike } from "@sobx/runtime";
+const store = new ProxyLike({ count: 0 });
+reaction(
+  () => store.get("count"),
+  (count) => console.log("count:", count),
+);
+runInAction(() => {
+  store.set("count", store.get("count") + 1);
+});
+```
+
 ## Benchmarks
 
-Runtime comparison (MobX vs sobx compiled with `@sobx/runtime` ProxyLike), same workload in `node:vm`, 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via `packages/bench` (`pnpm bench`).
+Runtime comparison (MobX vs the same code compiled by sobx), same workload in `node:vm`, 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via [`packages/bench`](../bench).
 
-| Fixture                      | MobX (ms) | sobx (ms) | sobx vs MobX   |
-|-----------------------------|-----------|-----------|----------------|
-| combined-reaction-on-name   | 293.88    | 81.29     | **261.5% faster** |
-| counter-increment           | 280.98    | 52.30     | **437.3% faster** |
-| multiple-reactions          | 260.10    | 44.43     | **485.4% faster** |
-| observable-writes-only      | 138.13    | 52.75     | **161.8% faster** |
-| sync-effect                 | 294.76    | 81.37     | **262.3% faster** |
+| Fixture | MobX (ms) | sobx (ms) | sobx vs MobX |
+|---|---|---|---|
+| combined-reaction-on-name | 460.37 | 179.19 | **156.9% faster** |
+| counter-increment | 497.97 | 164.01 | **203.6% faster** |
+| multiple-reactions | 469.38 | 152.09 | **208.6% faster** |
+| observable-writes-only | 228.08 | 107.96 | **111.3% faster** |
+| sync-effect | 512.73 | 196.81 | **160.5% faster** |
 
+These numbers are with full MobX semantics: tracked dependencies, batching, equality checks. Earlier, faster figures came from an inlined reaction that didn't behave like MobX.

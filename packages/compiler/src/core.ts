@@ -1,5 +1,6 @@
+import type { DiagnosticsConfig } from "./diagnostics.js";
 import { DEFAULT_MODULE_SPECIFIER } from "./transform.js";
-import { SobxTransformer } from "./transformers/sobx.js";
+import { PARSER_PLUGINS, SobxTransformer } from "./transformers/sobx.js";
 
 const DEFAULT_INCLUDE = /\.[jt]sx?$/;
 /** Skip dependency sources — Babel-parsing node_modules dominates bundler time. */
@@ -18,11 +19,17 @@ export interface SobxCompilerOptions {
 	 * Module specifier to treat as sobx (only transform when imported from here). Default `"@sobx/magic"`.
 	 */
 	moduleSpecifier?: string;
+	/**
+	 * Per-code severity overrides for diagnostics (`"error"` fails the build, `"warning"` is
+	 * logged, `"info"` / `"off"` are silent), e.g. `{ "deep-mutation": "warning" }`.
+	 */
+	diagnostics?: DiagnosticsConfig;
 }
 
 export type ASTPluginFactory = (opts: {
 	include?: RegExp;
 	exclude?: string | RegExp | (string | RegExp)[];
+	parserOptions?: { plugins?: unknown[] };
 	transformer: unknown[];
 }) => unknown;
 
@@ -44,11 +51,13 @@ export function createSobxCompiler(ast: ASTPluginFactory) {
 			include = DEFAULT_INCLUDE,
 			exclude,
 			moduleSpecifier = DEFAULT_MODULE_SPECIFIER,
+			diagnostics,
 		} = options;
 		return ast({
 			include: include as RegExp,
 			exclude: mergeExclude(exclude),
-			transformer: [SobxTransformer(moduleSpecifier)],
+			parserOptions: { plugins: [...PARSER_PLUGINS] },
+			transformer: [SobxTransformer({ moduleSpecifier, diagnostics })],
 		});
 	};
 }

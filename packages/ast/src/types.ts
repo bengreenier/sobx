@@ -444,6 +444,8 @@ export type DiagnosticCode =
 	| "api-not-called"
 	/** An API was called with missing / malformed arguments. */
 	| "invalid-arguments"
+	/** `observable([...])` / `observable(new Map())` etc.: arrays, Maps and Sets are not modeled. */
+	| "observable-collection"
 	/** `observable(...)` / `computed(...)` result not bound to a simple identifier. */
 	| "unbound-observable"
 	/** An observable (or class, instance, computed) reference escapes analysis. */

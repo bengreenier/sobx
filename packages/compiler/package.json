@@ -72,6 +72,7 @@
 		"@babel/types": "^8.0.4",
 		"@sobx/ast": "workspace:*",
 		"@sobx/runtime": "workspace:*",
+		"ast-kit": "^3.0.0",
 		"unplugin": "^3.3.0",
 		"unplugin-ast": "^0.17.2"
 	},
