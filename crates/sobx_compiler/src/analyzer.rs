@@ -1,5 +1,5 @@
-//! Rust port of the sobx analyzer (`packages/ast/src/analyze.ts`), built on oxc_parser +
-//! oxc_semantic. Produces the same IR.
+//! The sobx analyzer, built on oxc_parser + oxc_semantic. Produces the IR described by
+//! `@sobx/ast` (`packages/ast/src/types.ts`).
 
 use std::collections::{HashMap, HashSet};
 

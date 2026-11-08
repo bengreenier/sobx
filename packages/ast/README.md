@@ -59,11 +59,3 @@ mod.diagnostics; // []
 ## Scope
 
 Analysis is per-module. Cross-module observables are surfaced as diagnostics: `observable-escape` when exported, and `unresolved-import` when an import is used inside a tracked function.
-
-## Tests (not distributed)
-
-`test/` holds a reference analyzer written in TypeScript on Babel. It is not part of the published package. It exists so the Rust analyzer in [`crates/sobx_compiler`](../../crates/sobx_compiler) can be checked against an independent implementation:
-
-- `test/analyze*.spec.ts`: the analyzer specs. They run against the Babel analyzer and, when the native addon is built (`pnpm --filter @sobx/compiler build:native`), also against the Rust analyzer. In that `native` vitest project, every input is also a full-IR equivalence check between the two.
-- `test/native/differential.spec.ts`: a seeded differential fuzz test comparing the two analyzers on generated programs (400 seeds by default; set `SOBX_FUZZ_SEEDS` to change this).
-- `test/bench.ts`: Babel vs Rust benchmark (`pnpm --filter @sobx/ast bench`).

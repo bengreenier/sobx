@@ -6,8 +6,8 @@ import type {
 	DiagnosticCode,
 	ObjectObservable,
 	SobxModule,
-} from "../src/types.js";
-import { type AnalyzeOptions, analyze } from "./analyze.js";
+} from "@sobx/ast";
+import { type AnalyzeOptions, analyze } from "../native.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = path.join(__dirname, "__fixtures__");

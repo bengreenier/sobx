@@ -4,8 +4,8 @@ import type {
 	DiagnosticCode,
 	ObservableMember,
 	SobxModule,
-} from "../src/types.js";
-import { analyze } from "./analyze.js";
+} from "@sobx/ast";
+import { analyze } from "../native.js";
 
 function codes(mod: SobxModule): DiagnosticCode[] {
 	return mod.diagnostics.map((d) => d.code);
@@ -751,7 +751,7 @@ describe("ids", () => {
 
 describe("renumbering", () => {
 	// Regression: accesses in one function used to share a context object, which renumbering
-	// then remapped once per access (found by the Rust/Babel differential fuzz).
+	// then remapped once per access (found by differential fuzzing during the Rust port).
 	it("remaps each access's context exactly once", () => {
 		const mod = analyze(`
 			import { makeAutoObservable, action } from "@sobx/magic";

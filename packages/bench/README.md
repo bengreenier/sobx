@@ -8,4 +8,4 @@ pnpm bench
 
 from this package or from the repo root. It needs the compiler built (`pnpm build`) and its native analyzer (`pnpm --filter @sobx/compiler build:native`). The script sets `NODE_ENV` POSIX-style, which doesn't work in pnpm's default Windows shell; there, run `NODE_ENV=production npx tsx scripts/bench.ts` from a POSIX shell such as Git Bash.
 
-For the analyzer itself (Babel reference vs Rust), see `pnpm --filter @sobx/ast bench`.
+For per-phase timings of the analyzer itself, see `cargo run --release --example profile -- <file>` in `crates/sobx_compiler`.

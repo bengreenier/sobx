@@ -31,7 +31,7 @@ You write MobX-style code against `@sobx/magic`. At build time, `@sobx/compiler`
 - redirects the imports to `@sobx/runtime`, a small MobX-compatible runtime that implements the API;
 - compiles local observable objects to a `ProxyLike` with explicit `get` / `set` calls (the fast path).
 
-`packages/ast/test` keeps an independent TypeScript (Babel) analyzer that the Rust one is checked against; it is not published.
+The analyzer's tests (specs and an invariant fuzz) live in `packages/compiler/src/analyzer`.
 
 **[What's supported](./docs/support.md)**: every API and pattern, and whether it's compiled, handled by the runtime, or reported.
 

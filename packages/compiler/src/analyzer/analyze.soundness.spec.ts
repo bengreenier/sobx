@@ -1,5 +1,5 @@
-import type { Access, DiagnosticCode, SobxModule } from "../src/types.js";
-import { analyze } from "./analyze.js";
+import type { Access, DiagnosticCode, SobxModule } from "@sobx/ast";
+import { analyze } from "../native.js";
 
 function codes(mod: SobxModule): DiagnosticCode[] {
 	return mod.diagnostics.map((d) => d.code);

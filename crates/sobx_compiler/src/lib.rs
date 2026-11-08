@@ -15,7 +15,7 @@ use oxc_span::SourceType;
 pub const DEFAULT_MODULE_SPECIFIER: &str = "@sobx/magic";
 
 /// Analyze `source` and return the IR as a JSON string. Syntax errors are returned as `Err`
-/// (like the Babel analyzer, which throws), rather than analyzing a recovered partial AST.
+/// rather than analyzing a recovered partial AST.
 pub fn analyze_to_json(
     source: &str,
     module_specifier: Option<String>,

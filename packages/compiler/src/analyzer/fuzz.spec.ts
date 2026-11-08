@@ -1,9 +1,14 @@
 /**
- * Differential fuzz: random (valid) programs mixing every modeled feature, analyzed by both
- * the Rust and Babel analyzers. `analyze` here is the native shim, which throws if the full
- * IRs differ. Runs only in the `native` vitest project.
+ * Invariant fuzz: random (valid) programs mixing every modeled feature. For each, the analyzer
+ * must not throw, its IR must be internally consistent (ids, cross-references, spans), and the
+ * compiler's output must parse. Set SOBX_FUZZ_SEEDS to search longer.
  */
-import { analyze } from "./analyze.js";
+import generate from "@babel/generator";
+import { parse } from "@babel/parser";
+import type { SobxModule, Span } from "@sobx/ast";
+import { analyze } from "../native.js";
+import { transformSobx } from "../transform.js";
+import { PARSER_PLUGINS } from "../transformers/sobx.js";
 
 /** Small deterministic PRNG (mulberry32), so failures reproduce from the seed. */
 function rng(seed: number): () => number {
@@ -204,33 +209,161 @@ const SEEDS = Array.from(
 	(_, i) => i + 1,
 );
 
-describe("differential: invalid sources", () => {
+/** Line (1-based) and column (0-based, UTF-16) of `offset` in `source`. */
+function position(source: string, offset: number) {
+	const before = source.slice(0, offset);
+	const line = before.split("\n").length;
+	return { line, column: offset - (before.lastIndexOf("\n") + 1) };
+}
+
+/** Every IR consistency rule; returns the violations. */
+function violations(mod: SobxModule, source: string): string[] {
+	const problems: string[] = [];
+	const check = (ok: boolean, message: string) => {
+		if (!ok) problems.push(message);
+	};
+
+	// Ids are sequential within each kind, in source order.
+	const kinds = {
+		observable: mod.observables,
+		computed: mod.computeds,
+		access: mod.accesses,
+		reaction: mod.reactions,
+		action: mod.actions,
+	} as const;
+	const ids = new Set<string>();
+	for (const [kind, entities] of Object.entries(kinds)) {
+		entities.forEach((e: { id: string; span: Span }, i: number) => {
+			check(e.id === `${kind}:${i}`, `${e.id} at index ${i}`);
+			ids.add(e.id);
+			const previous = entities[i - 1] as { span: Span } | undefined;
+			if (previous) {
+				check(
+					previous.span.start <= e.span.start,
+					`${e.id} is before the previous ${kind}`,
+				);
+			}
+		});
+	}
+	const ref = (id: string | null | undefined, where: string) => {
+		if (id != null) check(ids.has(id), `${where} refers to missing ${id}`);
+	};
+
+	for (const o of mod.observables) {
+		if (o.shape.kind === "object") {
+			for (const m of o.shape.members) {
+				ref(m.computed, `${o.id}.${m.key}`);
+				ref(m.action, `${o.id}.${m.key}`);
+			}
+		}
+	}
+	for (const c of mod.computeds) {
+		if (c.source.kind === "getter") ref(c.source.observable, c.id);
+		for (const d of [...c.dependencies, ...c.indirectDependencies])
+			ref(d, c.id);
+	}
+	for (const a of mod.accesses) {
+		if (a.kind === "ComputedRead") ref(a.computed, a.id);
+		else ref(a.observable, a.id);
+		const ctx = a.context;
+		if (ctx.kind === "tracked" || ctx.kind === "tracked-nested")
+			ref(ctx.by, a.id);
+		if (ctx.kind === "effect") ref(ctx.reaction, a.id);
+		if (ctx.kind === "action") ref(ctx.action, a.id);
+		if (ctx.kind === "after-await") ref(ctx.in, a.id);
+	}
+	for (const r of mod.reactions) {
+		for (const d of [...r.dependencies, ...r.indirectDependencies])
+			ref(d, r.id);
+		for (const d of r.dependencies) {
+			const a = mod.accesses.find((x) => x.id === d);
+			check(
+				a?.context.kind === "tracked" &&
+					(a.context as { by: string }).by === r.id,
+				`${r.id} dependency ${d} is not tracked by it`,
+			);
+		}
+	}
+	for (const a of mod.actions) {
+		if (a.source.kind === "member") ref(a.source.observable, a.id);
+		for (const w of a.writes) {
+			const access = mod.accesses.find((x) => x.id === w);
+			check(
+				access?.kind === "Write" || access?.kind === "Delete",
+				`${a.id} write ${w} is not a write`,
+			);
+		}
+	}
+	for (const d of mod.diagnostics) {
+		for (const id of d.related ?? []) ref(id, `diagnostic ${d.code}`);
+	}
+
+	// Every span lies within the source, and its line / column match its offsets.
+	const spans: Array<[string, Span]> = [
+		...mod.imports.map((x) => ["import", x.span] as [string, Span]),
+		...Object.values(kinds).flatMap((entities) =>
+			entities.map(
+				(e: { id: string; span: Span }) => [e.id, e.span] as [string, Span],
+			),
+		),
+		...mod.diagnostics.map(
+			(d) => [`diagnostic ${d.code}`, d.span] as [string, Span],
+		),
+	];
+	for (const [where, span] of spans) {
+		check(
+			0 <= span.start && span.start <= span.end && span.end <= source.length,
+			`${where} span ${span.start}..${span.end} is out of range`,
+		);
+		const start = position(source, span.start);
+		const end = position(source, span.end);
+		check(
+			span.loc.start.line === start.line &&
+				span.loc.start.column === start.column &&
+				span.loc.end.line === end.line &&
+				span.loc.end.column === end.column,
+			`${where} loc does not match its offsets`,
+		);
+	}
+	return problems;
+}
+
+describe("fuzz: invalid sources", () => {
 	it.each([
 		"const x = ;",
 		"function f() { await x; }",
 		'import { observable } from "@sobx/magic"; const s = observable({ a: 1 }',
 		"class { }",
-	])("both analyzers reject %j", (source) => {
-		// The shim rethrows Babel's error when both throw, and reports a mismatch otherwise.
-		let message = "";
-		try {
-			analyze(source);
-		} catch (error) {
-			message = (error as Error).message;
-		}
-		expect(message).not.toBe("");
-		expect(message).not.toMatch(/analyzer threw but/);
+	])("the analyzer rejects %j", (source) => {
+		expect(() => analyze(source)).toThrow(/failed to parse/);
 	});
 });
 
-describe("differential: Rust vs Babel analyzer on random programs", () => {
+describe("fuzz: random programs", () => {
 	it.each(SEEDS)("seed %i", (seed) => {
 		const source = program(seed);
+		const fail = (message: string): never => {
+			throw new Error(`${message}\n\nsource (seed ${seed}):\n${source}`);
+		};
+		const mod = analyze(source, { filename: `seed-${seed}.ts` });
+		const problems = violations(mod, source);
+		if (problems.length) {
+			fail(`IR invariants violated:\n  ${problems.join("\n  ")}`);
+		}
+
+		const ast = parse(source, {
+			sourceType: "module",
+			plugins: ["typescript", ...PARSER_PLUGINS],
+		});
+		const { code } = generate(transformSobx(ast.program, source).ast);
 		try {
-			analyze(source, { filename: `seed-${seed}.ts` });
+			parse(code, {
+				sourceType: "module",
+				plugins: ["typescript", ...PARSER_PLUGINS],
+			});
 		} catch (error) {
-			throw new Error(
-				`${(error as Error).message}\n\nsource (seed ${seed}):\n${source}`,
+			fail(
+				`compiled output does not parse: ${(error as Error).message}\n\n${code}`,
 			);
 		}
 	});

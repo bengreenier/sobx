@@ -26,8 +26,8 @@ jobs:
       - run: pnpm test
 
   native:
-    # Builds the Rust analyzer (crates/sobx_compiler) and checks it against the Babel reference
-    # analyzer in packages/ast/test (full-IR parity on every spec input, plus a differential fuzz).
+    # Builds the Rust analyzer (crates/sobx_compiler) on every OS and runs the compiler's tests
+    # against it: the analyzer specs, a longer invariant fuzz, and the compile tests.
     name: Native analyzer (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -48,8 +48,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: cargo clippy --release --all-targets -- -D warnings
       - run: pnpm --filter @sobx/compiler build:native
-      - name: Parity tests and differential fuzz
-        run: pnpm --filter @sobx/ast exec vitest run --project native
+      - run: pnpm --filter "@sobx/compiler..." build
+      - name: Analyzer specs, fuzz, and compile tests
+        run: pnpm --filter @sobx/compiler exec vitest run --project node
         env:
-          SOBX_REQUIRE_NATIVE: "1"
           SOBX_FUZZ_SEEDS: "3000"

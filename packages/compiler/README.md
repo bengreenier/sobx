@@ -135,3 +135,5 @@ pnpm --filter @sobx/compiler build:native   # writes sobx-compiler.node (git-ign
 ## Development
 
 The transform fixtures in `src/__fixtures__` import from `"mobx"` (and tests pass `moduleSpecifier: "mobx"`) to avoid a circular dependency on the `@sobx/magic` package. The tests need the native analyzer built (`pnpm --filter @sobx/compiler build:native`).
+
+The analyzer's own tests are in `src/analyzer`: specs that assert on the IR for each pattern, and an invariant fuzz (`fuzz.spec.ts`; `SOBX_FUZZ_SEEDS` sets the number of generated programs, 400 by default).
