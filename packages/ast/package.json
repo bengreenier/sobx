@@ -31,11 +31,13 @@
 		"build:types": "tsc -p tsconfig.lib.json",
 		"build:lib": "vite build",
 		"lint": "biome check .",
-		"test": "vitest --coverage"
+		"test": "vitest --coverage",
+		"bench": "tsx test/bench.ts"
 	},
-	"dependencies": {
+	"devDependencies": {
 		"@babel/parser": "^8.0.4",
 		"@babel/traverse": "^8.0.4",
-		"@babel/types": "^8.0.4"
+		"@babel/types": "^8.0.4",
+		"tsx": "^4.23.1"
 	}
 }

@@ -19,13 +19,13 @@
 		"build": "rspack build"
 	},
 	"dependencies": {
-		"@sobx/core": "workspace:*"
+		"@sobx/magic": "workspace:*",
+		"@sobx/runtime": "workspace:*"
 	},
 	"devDependencies": {
 		"@rspack/cli": "^2.1.5",
 		"@rspack/core": "^2.1.5",
 		"@sobx/compiler": "workspace:*",
-		"mobx": "^6.16.1",
 		"typescript": "^6.0.3"
 	}
 }

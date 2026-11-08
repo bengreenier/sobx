@@ -61,14 +61,17 @@
 		"build:types": "tsc -p tsconfig.lib.json",
 		"build:lib": "vite build",
 		"lint": "biome check .",
-		"test": "vitest --coverage"
+		"test": "vitest --coverage",
+		"build:native": "cargo build --release -p sobx_compiler && node scripts/copy-native.mjs",
+		"test:native": "cargo test --release -p sobx_compiler"
 	},
 	"dependencies": {
 		"@babel/generator": "^8.0.0",
 		"@babel/parser": "^8.0.4",
 		"@babel/traverse": "^8.0.4",
 		"@babel/types": "^8.0.4",
-		"@sobx/core": "workspace:*",
+		"@sobx/ast": "workspace:*",
+		"@sobx/runtime": "workspace:*",
 		"unplugin": "^3.3.0",
 		"unplugin-ast": "^0.17.2"
 	},

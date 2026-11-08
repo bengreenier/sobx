@@ -1,4 +1,4 @@
-import { observable, reaction } from "mobx";
+import { observable, reaction } from "@sobx/magic";
 
 const store = observable({ count: 0 });
 reaction(

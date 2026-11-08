@@ -1,6 +1,6 @@
 import { observable, reaction } from "mobx";
 // MobX-style counter: observable({ count: 0 }) + reaction + increment (vanilla JS pattern)
-import { ProxyLike } from "@sobx/core";
+import { ProxyLike } from "@sobx/runtime";
 const counter = new ProxyLike({
   count: 0
 });

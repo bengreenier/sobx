@@ -55,7 +55,7 @@ export interface SobxModule {
 	irVersion: typeof IR_VERSION;
 	/** Filename, if one was provided to the analyzer. */
 	filename: string | null;
-	/** Module specifier treated as the MobX-compatible API (e.g. `"sobx"` or `"mobx"`). */
+	/** Module specifier treated as the MobX-compatible API (e.g. `"@sobx/magic"` or `"mobx"`). */
 	moduleSpecifier: string;
 	imports: SobxImport[];
 	observables: Observable[];
@@ -432,9 +432,9 @@ export interface UnsupportedUsage {
 // ---------------------------------------------------------------------------
 
 export type DiagnosticCode =
-	/** `import * as m from "sobx"`. */
+	/** `import * as m from "@sobx/magic"`. */
 	| "namespace-import"
-	/** `import m from "sobx"`. */
+	/** `import m from "@sobx/magic"`. */
 	| "default-import"
 	/** Imported a name that is not a known API. */
 	| "unknown-import"

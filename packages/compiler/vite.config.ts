@@ -21,7 +21,9 @@ export default defineConfig({
 		},
 		rollupOptions: {
 			external: [
-				"@sobx/core",
+				/^node:/,
+				"@sobx/ast",
+				"@sobx/runtime",
 				"unplugin",
 				"unplugin-ast",
 				"unplugin-ast/vite",

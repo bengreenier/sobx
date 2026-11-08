@@ -2,7 +2,7 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-sobx's intermediate representation (IR) of a program's MobX-style usages, plus an analyzer that builds it from TypeScript / JavaScript source.
+The types of sobx's intermediate representation (IR) of a program's MobX-style usages. The analyzer that builds the IR ships with [`@sobx/compiler`](../compiler), as a native (Rust / oxc) binary.
 
 The IR is **plain, JSON-serializable data**: string kinds, character spans, and cross-references by stable id (`observable:0`, `reaction:0`, `access:3`, ...). No parser nodes leak into it, so any front-end can produce it and any back-end (the compiler, linters, tooling) can consume it.
 
@@ -14,15 +14,10 @@ The analyzer is **sound or loud**: anything it cannot model precisely (aliasing,
 pnpm add @sobx/ast
 ```
 
-## API
+## Exports
 
-- **`analyze(source, options?)`** — Parse a module and return its `SobxModule`.
-- **`analyzeAst(file, options?)`** — Same, from an already-parsed Babel `File` (not mutated).
-
-### Options
-
-- **`moduleSpecifier`** — Module whose imports are analyzed. Default: `"sobx"`.
-- **`filename`** — Recorded on the resulting module.
+- **`SobxModule`** and the rest of the IR types (`Observable`, `Computed`, `Access`, `Reaction`, `Action`, `Diagnostic`, ...).
+- **`IR_VERSION`**: the IR's version number, bumped on breaking changes.
 
 ## The IR
 
@@ -45,15 +40,17 @@ Names are resolved through scope bindings, so a local variable that shadows an o
 
 ## Example
 
+For this module:
+
 ```ts
-import { analyze } from "@sobx/ast";
+import { observable, reaction } from "@sobx/magic";
+const store = observable({ a: 1, b: 2 });
+reaction(() => store.a + store.b, (sum) => console.log(sum));
+```
 
-const mod = analyze(`
-  import { observable, reaction } from "sobx";
-  const store = observable({ a: 1, b: 2 });
-  reaction(() => store.a + store.b, (sum) => console.log(sum));
-`);
+the analyzer produces a `SobxModule` where:
 
+```ts
 mod.reactions[0]?.dependencies; // ["access:0", "access:1"]
 mod.accesses.map((a) => a.kind); // ["Read", "Read"]
 mod.diagnostics; // []
@@ -61,4 +58,12 @@ mod.diagnostics; // []
 
 ## Scope
 
-Analysis is currently per-module, using Babel as the front-end. Cross-module observables are surfaced as diagnostics: `observable-escape` when exported, and `unresolved-import` when an import is used inside a tracked function.
+Analysis is per-module. Cross-module observables are surfaced as diagnostics: `observable-escape` when exported, and `unresolved-import` when an import is used inside a tracked function.
+
+## Tests (not distributed)
+
+`test/` holds a reference analyzer written in TypeScript on Babel. It is not part of the published package. It exists so the Rust analyzer in [`crates/sobx_compiler`](../../crates/sobx_compiler) can be checked against an independent implementation:
+
+- `test/analyze*.spec.ts`: the analyzer specs. They run against the Babel analyzer and, when the native addon is built (`pnpm --filter @sobx/compiler build:native`), also against the Rust analyzer. In that `native` vitest project, every input is also a full-IR equivalence check between the two.
+- `test/native/differential.spec.ts`: a seeded differential fuzz test comparing the two analyzers on generated programs (400 seeds by default; set `SOBX_FUZZ_SEEDS` to change this).
+- `test/bench.ts`: Babel vs Rust benchmark (`pnpm --filter @sobx/ast bench`).

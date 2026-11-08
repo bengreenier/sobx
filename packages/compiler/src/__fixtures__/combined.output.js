@@ -1,6 +1,6 @@
 import { observable, reaction } from "mobx";
 // Multiple features in one file: observable, reads, writes, reaction
-import { ProxyLike } from "@sobx/core";
+import { ProxyLike } from "@sobx/runtime";
 const store = new ProxyLike({
   count: 0,
   name: ""

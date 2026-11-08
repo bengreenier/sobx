@@ -1,0 +1,11 @@
+# @sobx/bench
+
+Runtime benchmarks: MobX vs the same code compiled by `@sobx/compiler` (running on `@sobx/runtime`'s `ProxyLike`), in `node:vm`. Run with:
+
+```bash
+pnpm bench
+```
+
+from this package or from the repo root. It needs the compiler built (`pnpm build`) and its native analyzer (`pnpm --filter @sobx/compiler build:native`). The script sets `NODE_ENV` POSIX-style, which doesn't work in pnpm's default Windows shell; there, run `NODE_ENV=production npx tsx scripts/bench.ts` from a POSIX shell such as Git Bash.
+
+For the analyzer itself (Babel reference vs Rust), see `pnpm --filter @sobx/ast bench`.

@@ -14,7 +14,7 @@ function compile(source: string, options?: TransformSobxOptions): string {
 		sourceType: "module",
 		plugins: ["typescript"],
 	});
-	const { ast: transformed } = transformSobx(ast.program, options);
+	const { ast: transformed } = transformSobx(ast.program, source, options);
 	return generate(transformed).code;
 }
 

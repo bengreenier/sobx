@@ -19,11 +19,11 @@
 		"build": "webpack"
 	},
 	"dependencies": {
-		"@sobx/core": "workspace:*"
+		"@sobx/magic": "workspace:*",
+		"@sobx/runtime": "workspace:*"
 	},
 	"devDependencies": {
 		"@sobx/compiler": "workspace:*",
-		"mobx": "^6.16.1",
 		"ts-loader": "^9.6.2",
 		"typescript": "^6.0.3",
 		"webpack": "^5.109.0",

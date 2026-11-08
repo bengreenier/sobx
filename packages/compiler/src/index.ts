@@ -1,16 +1,17 @@
+export { type AnalyzeOptions, analyze } from "./native.js";
+export {
+	buildReactionExpression,
+	type CompilePlan,
+	planFromModule,
+	type ReactionRead,
+} from "./plan.js";
 export type { SobxCompilerOptions } from "./plugin.js";
 export { sobxCompiler } from "./plugin.js";
 export type { TransformSobxOptions } from "./transform.js";
 export {
-	buildReactionExpression,
-	collectObservableBindings,
+	DEFAULT_MODULE_SPECIFIER,
 	ensureImports,
-	getMemberKey,
-	getSobxImportLocalNames,
+	planSource,
 	transformSobx,
 } from "./transform.js";
-export { AssignmentExpressionTransformer } from "./transformers/assignment-expression.js";
-export { ImportInjectionTransformer } from "./transformers/import-injection.js";
-export { MemberExpressionTransformer } from "./transformers/member-expression.js";
-export { ObservableTransformer } from "./transformers/observable.js";
-export { ReactionTransformer } from "./transformers/reaction.js";
+export { SobxTransformer } from "./transformers/sobx.js";

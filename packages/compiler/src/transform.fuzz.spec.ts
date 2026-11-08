@@ -26,7 +26,7 @@ function compileNoThrow(
 	const ast = tryParse(source);
 	if (!ast) return { ok: false, error: new Error("Parse failed") };
 	try {
-		const { ast: transformed } = transformSobx(ast.program);
+		const { ast: transformed } = transformSobx(ast.program, source);
 		const code = generate(transformed).code;
 		return { ok: true, code };
 	} catch (e) {
