@@ -1,5 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { sobxCompiler } from "@sobx/compiler/vite";
 import { defineConfig } from "vitest/config";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+/** React 18, and the libraries the tests use with React, installed against it. */
+const react18 = path.join(here, "test/react18/node_modules");
 
 export default defineConfig({
 	// Only the compiled specs are written against @sobx/magic (the others use @sobx/runtime
@@ -23,5 +29,24 @@ export default defineConfig({
 		coverage: {
 			provider: "istanbul",
 		},
+		projects: [
+			{ extends: true, test: { name: "react19", env: { REACT_MAJOR: "19" } } },
+			{
+				extends: true,
+				test: {
+					name: "react18",
+					env: { REACT_MAJOR: "18" },
+					setupFiles: ["test/no-finalization-registry.ts"],
+				},
+				resolve: {
+					alias: [
+						{
+							find: /^(react|react-dom|mobx|mobx-react|@testing-library\/react)(\/.*)?$/,
+							replacement: `${react18.replaceAll("\\", "/")}/$1$2`,
+						},
+					],
+				},
+			},
+		],
 	},
 });

@@ -7,7 +7,7 @@ import {
 import { act, render } from "@testing-library/react";
 import { Component, memo, StrictMode } from "react";
 import { renderToString } from "react-dom/server";
-import { TimerBasedFinalizationRegistry } from "./finalization.js";
+import { clearTimers, TimerBasedFinalizationRegistry } from "./finalization.js";
 import {
 	enableStaticRendering,
 	isObserverBatched,
@@ -46,6 +46,10 @@ describe("observer", () => {
 		act(() => runInAction(() => box.set(1)));
 		expect(container.textContent).toBe("1");
 		unmount();
+		// React 18 throws away the state of StrictMode's first render, so its reaction is only
+		// disposed by the finalization registry (when garbage collected; immediately here, with
+		// the timer-based registry the React 18 tests run on).
+		clearTimers();
 		expect(observers(box)).toBe(0);
 	});
 
