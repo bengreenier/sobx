@@ -106,6 +106,10 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 			const replacement = rewriteMatch(node, state.plan, state);
 			if (!replacement) return undefined;
 			state.replaced.push([start, end]);
+			// Comments around the node stay in the source (only the node's own span is replaced);
+			// a copied node still carrying them would print them a second time.
+			replacement.leadingComments = null;
+			replacement.trailingComments = null;
 			return replacement;
 		},
 

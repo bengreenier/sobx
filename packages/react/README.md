@@ -61,4 +61,4 @@ Components that render but never mount (StrictMode's discarded renders, Suspense
 - In development builds, mobx-react throws when a class component's `this.props` / `this.state` are read from another reactive context (a `computed` or `reaction`); sobx doesn't check this.
 - No `reactionScheduler`: React 18+ batches the updates of the components a change re-renders.
 
-Behaviour is checked against mobx-react: `src/parity.spec.tsx` renders the same components with `mobx` + `mobx-react` and with `@sobx/runtime` + `@sobx/react`, and compares what they render and how often. `src/compiled.spec.tsx` renders components written against `@sobx/magic` and compiled by the sobx Vite plugin.
+Behaviour is checked against mobx-react: `src/parity.spec.tsx` renders the same components with `mobx` + `mobx-react` and with `@sobx/runtime` + `@sobx/react`, and compares what they render and how often. `src/react.compiled.spec.tsx` renders components written against `@sobx/magic` and compiled by the sobx Vite plugin.

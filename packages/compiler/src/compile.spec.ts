@@ -651,6 +651,25 @@ store.count += 1;`);
 		expect(out).not.toMatch(/store\.count/);
 	});
 
+	it("keeps comments around rewritten nodes once", async () => {
+		const out = await compileWithPlugin(`/** header */
+import { observable } from "@sobx/magic";
+// before store
+const s = observable({ a: 1 }); // after store
+/* before read */ console.log(s.a /* in read */);
+s.a = 2; // after write`);
+		for (const comment of [
+			"/** header */",
+			"// before store",
+			"// after store",
+			"/* before read */",
+			"/* in read */",
+			"// after write",
+		]) {
+			expect(out.split(comment).length - 1, comment).toBe(1);
+		}
+	});
+
 	it("parses standard decorators", async () => {
 		const out =
 			await compileWithPlugin(`import { observable, computed, action } from "@sobx/magic";

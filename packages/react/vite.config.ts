@@ -2,8 +2,9 @@ import { sobxCompiler } from "@sobx/compiler/vite";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-	// compiled.spec.tsx is written against @sobx/magic; files that never mention it are skipped.
-	plugins: [sobxCompiler()],
+	// Only the compiled specs are written against @sobx/magic (the others use @sobx/runtime
+	// directly, to compare with MobX).
+	plugins: [sobxCompiler({ include: /\.compiled\.spec\.tsx$/ })],
 	build: {
 		emptyOutDir: false, // preserve dist/types from tsc (build:types runs first)
 		lib: {
