@@ -65,9 +65,21 @@ export class Reaction implements Derivation {
 
 	/** @internal Run `fn`, tracking what it reads as this reaction's dependencies. */
 	track<T>(fn: () => T): T {
-		const { value, tracking } = track(this, this.tracking, fn);
+		let failed = false;
+		let error: unknown;
+		const { value, tracking } = track(this, this.tracking, () => {
+			try {
+				return fn();
+			} catch (e) {
+				failed = true;
+				error = e;
+				return undefined;
+			}
+		});
+		// Keep what was read before an error: it is subscribed, and must be released later.
 		this.tracking = tracking;
-		return value;
+		if (failed) throw error;
+		return value as T;
 	}
 
 	/** Stop the reaction. */

@@ -198,7 +198,8 @@ describe("observable objects", () => {
 
 	it("can be made from frozen objects (as MobX)", () => {
 		const source = Object.freeze({ a: 1, nested: Object.freeze({ b: 2 }) });
-		const o = observable(source);
+		// The observable copy is writable, even though the source's type is readonly.
+		const o = observable(source) as { a: number; nested: { b: number } };
 		expect(o).not.toBe(source);
 		expect(track(() => [o.a, o.nested.b])).toEqual(["[1,2]"]);
 		const seen = track(() => o.nested.b);

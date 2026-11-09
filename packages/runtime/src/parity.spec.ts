@@ -275,6 +275,35 @@ describe("parity with MobX: Maps, Sets, boxes", () => {
 });
 
 describe("parity with MobX: reactions and computeds", () => {
+	parity(
+		"computeds that throw",
+		({ observable, computed, autorun, runInAction }, log) => {
+			const s = observable({ n: 1, fail: true });
+			let runs = 0;
+			const c = computed(() => {
+				runs++;
+				if (s.fail) throw new Error(`fail ${s.n}`);
+				return s.n * 2;
+			});
+			const stop = autorun(() => {
+				try {
+					log("value", c.get());
+				} catch (e) {
+					log("error", (e as Error).message);
+				}
+				try {
+					log("again", c.get()); // cached: not recomputed
+				} catch (e) {
+					log("again error", (e as Error).message);
+				}
+			});
+			runInAction(() => (s.n = 2)); // read before throwing: re-runs
+			runInAction(() => (s.fail = false));
+			runInAction(() => (s.fail = true));
+			log("runs", runs);
+			stop();
+		},
+	);
 	parity("reaction arguments", ({ observable, reaction, runInAction }, log) => {
 		const s = observable({ a: 1, b: 1 });
 		reaction(

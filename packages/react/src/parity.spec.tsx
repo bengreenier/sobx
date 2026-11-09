@@ -27,6 +27,9 @@ interface Lib {
 	useLocalObservable: typeof sobxReact.useLocalObservable;
 	Provider: typeof sobxReact.Provider;
 	inject: typeof sobxReact.inject;
+	reaction: typeof sobx.reaction;
+	disposeOnUnmount: typeof sobxReact.disposeOnUnmount;
+	PropTypes: typeof sobxReact.PropTypes;
 }
 
 const libs: Record<string, Lib> = {
@@ -326,6 +329,136 @@ describe("parity with mobx-react", () => {
 				log.push(container.textContent ?? "");
 				act(() => runInAction(() => (store.fail = true)));
 				log.push(container.textContent ?? "");
+			} finally {
+				console.error = error;
+			}
+		});
+	});
+
+	it("disposeOnUnmount, before or after observer", () => {
+		const error = console.error;
+		console.error = () => {}; // both warn that it's deprecated with React 18+
+		try {
+			expectParity(
+				({ observable, reaction, observer, disposeOnUnmount }, log) => {
+					const store = observable({ count: 0 });
+					class Plain extends Component {
+						override componentDidMount() {
+							disposeOnUnmount(
+								this,
+								reaction(
+									() => store.count,
+									(n) => log.push(`plain ${n}`),
+								),
+							);
+							disposeOnUnmount(this, [
+								() => log.push("disposed a"),
+								() => log.push("disposed b"),
+							]);
+						}
+						override componentWillUnmount() {
+							log.push("own unmount");
+						}
+						override render() {
+							return null;
+						}
+					}
+					const Observed = observer(Plain);
+					class ByKey extends Component {
+						disposer = () => log.push("disposed by key");
+						override render() {
+							return <span>{store.count}</span>;
+						}
+					}
+					disposeOnUnmount(ByKey.prototype, "disposer");
+					const ObservedByKey = observer(ByKey);
+					const { unmount } = render(
+						<>
+							<Observed />
+							<ObservedByKey />
+						</>,
+					);
+					act(() => store.count++);
+					unmount();
+					act(() => store.count++);
+					log.push(`count ${store.count}`);
+				},
+			);
+		} finally {
+			console.error = error;
+		}
+	});
+
+	it("PropTypes", () => {
+		expectParity(({ observable, PropTypes }, log) => {
+			const check = (
+				name: keyof typeof PropTypes,
+				value: unknown,
+				required = false,
+			) => {
+				const entry = PropTypes[name];
+				const validator =
+					typeof entry === "function" && !("isRequired" in entry)
+						? (entry as (t: unknown) => sobxReact.Requireable)(
+								(props: Record<string, unknown>, key: string) =>
+									typeof props[key] === "number"
+										? null
+										: new Error(`${key} is not a number`),
+							)
+						: (entry as sobxReact.Requireable);
+				const fn = required ? validator.isRequired : validator;
+				const error = fn({ p: value }, "p", "C", "prop", "p");
+				log.push(
+					`${name}${required ? ".isRequired" : ""}: ${error?.message ?? "ok"}`,
+				);
+			};
+			const array = observable([1, 2]);
+			const object = observable({ a: 1 });
+			const map = observable(new Map([["a", 1]]));
+			for (const name of Object.keys(PropTypes) as (keyof typeof PropTypes)[]) {
+				for (const value of [
+					array,
+					object,
+					map,
+					[1, "x"],
+					{ a: 1 },
+					1,
+					new Date(0),
+					/x/,
+				]) {
+					check(name, value);
+				}
+				check(name, undefined);
+				check(name, undefined, true);
+				check(name, null, true);
+			}
+		});
+	});
+
+	it("class components can't read props or state in other derivations", () => {
+		expectParity(({ observable, runInAction, computed, observer }, log) => {
+			const store = observable({ n: 1 });
+			const View = observer(
+				class extends Component<{ x: number }, { y: number }> {
+					override state = { y: 2 };
+					sum = computed(() => store.n + this.props.x);
+					override render() {
+						// Reading props and state in render is fine.
+						log.push(`render ${this.props.x} ${this.state.y}`);
+						try {
+							log.push(`sum ${this.sum.get()}`);
+						} catch {
+							log.push("threw");
+						}
+						return null;
+					}
+				},
+			);
+			const error = console.error;
+			console.error = () => {};
+			try {
+				render(<View x={1} />);
+				act(() => runInAction(() => store.n++));
 			} finally {
 				console.error = error;
 			}

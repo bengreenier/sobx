@@ -20,6 +20,11 @@ export interface ComputedOptions<T> {
 	keepAlive?: boolean;
 }
 
+/** An error thrown by a computed's function, cached as its value (as MobX does). */
+class CaughtException {
+	constructor(readonly cause: unknown) {}
+}
+
 const FRESH = 0;
 const MAYBE_STALE = 1;
 const STALE = 2;
@@ -35,7 +40,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 	private state = STALE;
 	private active = false;
 	private hasValue = false;
-	private value: T | undefined;
+	private value: T | CaughtException | undefined;
 	private readonly equals: Equals;
 
 	constructor(
@@ -57,6 +62,9 @@ export class Computed<T> implements Derivation, VersionedComputed {
 			outer.versions ??= new Map();
 			outer.versions.set(this, this.version);
 		}
+		// Rethrown to every reader, which still depends on the computed (and so re-runs when
+		// what it read before throwing changes).
+		if (this.value instanceof CaughtException) throw this.value.cause;
 		return this.value as T;
 	}
 
@@ -71,11 +79,22 @@ export class Computed<T> implements Derivation, VersionedComputed {
 			this.state = FRESH;
 			return;
 		}
-		const { value, tracking } = track(this, this.tracking, this.fn);
+		const { value, tracking } = track(this, this.tracking, () => {
+			try {
+				return this.fn();
+			} catch (error) {
+				return new CaughtException(error);
+			}
+		});
 		this.tracking = tracking;
 		this.active = true;
 		this.state = FRESH;
-		if (!this.hasValue || !this.equals(this.value, value)) {
+		if (
+			!this.hasValue ||
+			value instanceof CaughtException ||
+			this.value instanceof CaughtException ||
+			!this.equals(this.value, value)
+		) {
 			this.value = value;
 			this.hasValue = true;
 			this.version++;

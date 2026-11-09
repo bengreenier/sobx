@@ -298,6 +298,15 @@ export function computedsChanged(tracking: Tracking): boolean {
 	return false;
 }
 
+/**
+ * The dependency collector of the derivation running now (an opaque object, new for every
+ * run), or `null` outside derivations. For bindings that need to know whether a read happens
+ * in a particular derivation (e.g. `@sobx/react`'s development checks).
+ */
+export function currentTracking(): object | null {
+	return globalState.tracking;
+}
+
 /** Run `fn` without tracking what it reads. */
 export function untracked<T>(fn: () => T): T {
 	const outer = globalState.tracking;

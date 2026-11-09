@@ -50,6 +50,7 @@ MobX-compatible:
 Also:
 
 - **`untracked(fn)`**, **`batch(fn)`**.
+- **`currentTracking()`**: an opaque object identifying the derivation run in progress (or `null`), for bindings such as `@sobx/react`.
 - Compiler helpers (emitted by `@sobx/compiler`; plain JavaScript semantics for non-observables): `getProperty`, `setProperty`, `updateProperty`, `deleteProperty`, `hasProperty`, `keysOf`, `valuesOf`, `entriesOf`.
 - **`ProxyLike`**: see below.
 

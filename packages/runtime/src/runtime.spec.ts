@@ -6,6 +6,7 @@ import {
 	makeObservable,
 	observable,
 	ProxyLike,
+	Reaction,
 	reaction,
 	runInAction,
 	toJS,
@@ -76,6 +77,49 @@ describe("reaction", () => {
 		s.set("a", 2);
 		s.set("b", 2);
 		expect(effect).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("errors in derivations", () => {
+	/** How many derivations observe a box (white-box). */
+	const observers = (box: object) =>
+		(box as unknown as { dep: { observers: Set<unknown> } }).dep.observers.size;
+
+	it("a throwing Reaction.track keeps (and later releases) what it read", () => {
+		const a = observable.box(1);
+		const b = observable.box(2);
+		let runs = 0;
+		const r = new Reaction(() => runs++);
+		expect(() =>
+			r.track(() => {
+				a.get();
+				throw new Error("x");
+			}),
+		).toThrow("x");
+		expect(observers(a)).toBe(1);
+		runInAction(() => a.set(3));
+		expect(runs).toBe(1);
+		r.track(() => b.get());
+		expect(observers(a)).toBe(0);
+		expect(observers(b)).toBe(1);
+		r.dispose();
+		expect(observers(b)).toBe(0);
+	});
+
+	it("a throwing computed releases its dependencies when unobserved", () => {
+		const a = observable.box(1);
+		const c = computed(() => {
+			if (a.get() > 0) throw new Error("positive");
+			return a.get();
+		});
+		const stop = autorun(() => {
+			try {
+				c.get();
+			} catch {}
+		});
+		expect(observers(a)).toBe(1);
+		stop();
+		expect(observers(a)).toBe(0);
 	});
 });
 

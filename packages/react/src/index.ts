@@ -1,3 +1,4 @@
+export { disposeOnUnmount } from "./dispose-on-unmount.js";
 export {
 	clearTimers,
 	observerFinalizationRegistry as _observerFinalizationRegistry,
@@ -13,6 +14,7 @@ export {
 	observer,
 } from "./observer.js";
 export { type IObserverProps, Observer } from "./observer-component.js";
+export { PropTypes, type Requireable, type Validator } from "./prop-types.js";
 export {
 	type IStoresToProps,
 	type IValueMap,

@@ -34,7 +34,12 @@ export {
 	ObservableSet,
 } from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
-export { batch, type EnforceActions, untracked } from "./core.js";
+export {
+	batch,
+	currentTracking,
+	type EnforceActions,
+	untracked,
+} from "./core.js";
 export {
 	type AccessorAnnotation,
 	type ActionFn,

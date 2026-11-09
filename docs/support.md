@@ -63,7 +63,7 @@ switch `"mobx-react"` / `"mobx-react-lite"` imports to `"@sobx/react"`.
 | `Provider`, `inject`, `MobXProviderContext` | Yes | |
 | `enableStaticRendering`, `isUsingStaticRendering` | Yes | For server-side rendering. |
 | `useObserver`, `useLocalStore`, `useAsObservableSource`, `useStaticRendering`, `observerBatching`, `isObserverBatched` | Yes | Deprecated, as in mobx-react. |
-| `disposeOnUnmount`, `PropTypes` | No | Deprecated / removed in recent mobx-react and React. |
+| `disposeOnUnmount`, `PropTypes` | Yes | `disposeOnUnmount` is deprecated, as in mobx-react. |
 
 Components in `.tsx` / `.jsx` files written against `@sobx/magic` are compiled like any other
 code. Observables a component imports from another module or receives as props or through context
@@ -124,6 +124,7 @@ returned by `transformSobx` and not printed by the bundler plugins.
 | Accesses after `await` in an action or tracked function | Warning (`after-await`): they run outside the action / tracking, as in MobX. |
 | A reaction that keeps changing what it depends on | Throws after 100 iterations. |
 | Errors thrown in reactions | Logged with `console.error`; other reactions keep running. |
+| Errors thrown in computeds | Cached and rethrown to every reader, as in MobX; readers still depend on the computed and on what it read before throwing. |
 
 ## Differences from MobX
 
@@ -159,6 +160,5 @@ nested writes). Both check that the logged values match. Known differences:
   `observableRequiresReaction`, ...) are not implemented.
 - Not implemented: `extendObservable`, `observe` / `intercept`, `spy` / `trace`, `onBecomeObserved`,
   reaction schedulers / `delay`, legacy decorators.
-- React: [`@sobx/react`](../packages/react) has mobx-react's API, except `disposeOnUnmount`,
-  `PropTypes` and mobx-react's development check of class components' `this.props` /
-  `this.state` read from other derivations.
+- React: [`@sobx/react`](../packages/react) has mobx-react's API; `observerBatching` does
+  nothing (React 18+ batches updates itself).

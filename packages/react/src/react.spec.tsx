@@ -18,6 +18,7 @@ import {
 	useLocalObservable,
 	useObserver,
 } from "./index.js";
+import { patch } from "./utils.js";
 
 /** How many derivations observe a box (white-box: checks subscriptions are released). */
 function observers(box: object): number {
@@ -280,6 +281,34 @@ describe("static rendering", () => {
 		enableStaticRendering(true);
 		expect(renderToString(<View />)).toBe("<span>5</span>");
 		expect(observers(box)).toBe(0);
+	});
+});
+
+describe("patch", () => {
+	it("runs mixins after the method, however and whenever it's defined", () => {
+		const calls: string[] = [];
+		class Base {
+			componentWillUnmount?(): void;
+		}
+		patch(Base.prototype, "componentWillUnmount", () => calls.push("first"));
+		patch(Base.prototype, "componentWillUnmount", () => calls.push("second"));
+		const first = () => calls.push("first");
+		patch(Base.prototype, "componentWillUnmount", first);
+		patch(Base.prototype, "componentWillUnmount", first); // once
+		const a = new Base();
+		a.componentWillUnmount?.();
+		expect(calls).toEqual(["first", "second", "first"]);
+
+		calls.length = 0;
+		Base.prototype.componentWillUnmount = () => calls.push("own (prototype)");
+		new Base().componentWillUnmount?.();
+		expect(calls).toEqual(["own (prototype)", "first", "second", "first"]);
+
+		calls.length = 0;
+		const b = new Base();
+		b.componentWillUnmount = () => calls.push("own (instance)");
+		b.componentWillUnmount();
+		expect(calls).toEqual(["own (instance)", "first", "second", "first"]);
 	});
 });
 

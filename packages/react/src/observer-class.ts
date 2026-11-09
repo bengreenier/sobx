@@ -1,8 +1,8 @@
-import { Reaction } from "@sobx/runtime";
+import { currentTracking, Reaction } from "@sobx/runtime";
 import { type Component, type ComponentClass, PureComponent } from "react";
 import { observerFinalizationRegistry } from "./finalization.js";
 import { DEV, isUsingStaticRendering } from "./static-rendering.js";
-import { shallowEqual } from "./utils.js";
+import { patch, shallowEqual } from "./utils.js";
 
 const administration = Symbol("sobxObserverAdministration");
 const isObserverClass = Symbol("sobxIsObserver");
@@ -14,6 +14,13 @@ interface ClassAdministration {
 	mounted: boolean;
 	/** The reaction was invalidated before `componentDidMount` (e.g. by a child's). */
 	invalidatedBeforeMount: boolean;
+	name: string;
+	/** The render's tracking while it runs (development builds check reads against it). */
+	renderTracking: object | null;
+	// Development builds: `props` / `state` / `context` live here, behind checking accessors.
+	props: unknown;
+	state: unknown;
+	context: unknown;
 }
 
 type AnyComponent = Component<unknown, unknown> & {
@@ -31,12 +38,45 @@ function getAdministration(component: AnyComponent): ClassAdministration {
 		forceUpdate: null,
 		mounted: false,
 		invalidatedBeforeMount: false,
+		name: displayName(component.constructor as ComponentClass),
+		renderTracking: null,
+		props: undefined,
+		state: undefined,
+		context: undefined,
 	};
 	return component[administration];
 }
 
 function displayName(componentClass: ComponentClass): string {
 	return componentClass.displayName || componentClass.name || "<component>";
+}
+
+/**
+ * Development builds: reading a component's `props`, `state` or `context` in a derivation other
+ * than its own render (a `computed`, a `reaction`, another observer) is an error, as in
+ * mobx-react: they aren't observable, so the derivation would not see them change.
+ */
+function checkedProperty(
+	key: "props" | "state" | "context",
+): PropertyDescriptor {
+	return {
+		configurable: true,
+		enumerable: true,
+		get(this: AnyComponent) {
+			const adm = getAdministration(this);
+			const tracking = currentTracking();
+			if (tracking && tracking !== adm.renderTracking) {
+				throw new Error(
+					`[sobx-react] Cannot read "${adm.name}.${key}" in a reactive context, as it isn't observable.
+Please use component lifecycle method to copy the value into a local observable first.`,
+				);
+			}
+			return adm[key];
+		},
+		set(this: AnyComponent, value: unknown) {
+			getAdministration(this)[key] = value;
+		},
+	};
 }
 
 function createReaction(adm: ClassAdministration): Reaction {
@@ -103,6 +143,14 @@ export function makeClassComponentObserver<C extends AnyComponentClass>(
 		}
 	}
 
+	if (DEV) {
+		Object.defineProperties(prototype, {
+			props: checkedProperty("props"),
+			state: checkedProperty("state"),
+			context: checkedProperty("context"),
+		});
+	}
+
 	const originalRender = prototype.render;
 	if (typeof originalRender !== "function") {
 		throw new Error(
@@ -146,21 +194,17 @@ export function makeClassComponentObserver<C extends AnyComponentClass>(
 		return originalDidMount?.apply(this);
 	};
 
-	const originalWillUnmount = prototype.componentWillUnmount;
-	prototype.componentWillUnmount = function (this: AnyComponent) {
-		try {
-			return originalWillUnmount?.apply(this);
-		} finally {
-			if (!isUsingStaticRendering()) {
-				const adm = getAdministration(this);
-				adm.reaction?.dispose();
-				adm.reaction = null;
-				adm.forceUpdate = null;
-				adm.mounted = false;
-				adm.invalidatedBeforeMount = false;
-			}
-		}
-	};
+	// Patched (rather than wrapped) so that it composes with `disposeOnUnmount` and with a
+	// `componentWillUnmount` assigned later.
+	patch(prototype, "componentWillUnmount", function (this: AnyComponent) {
+		if (isUsingStaticRendering()) return;
+		const adm = getAdministration(this);
+		adm.reaction?.dispose();
+		adm.reaction = null;
+		adm.forceUpdate = null;
+		adm.mounted = false;
+		adm.invalidatedBeforeMount = false;
+	});
 
 	return componentClass;
 }
@@ -181,6 +225,14 @@ function createReactiveRender(
 		}
 		adm.invalidatedBeforeMount = false;
 		// Errors propagate to React (error boundaries).
-		return adm.reaction.track(render);
+		return adm.reaction.track(() => {
+			const outer = adm.renderTracking;
+			adm.renderTracking = currentTracking();
+			try {
+				return render();
+			} finally {
+				adm.renderTracking = outer;
+			}
+		});
 	};
 }
