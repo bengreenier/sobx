@@ -1,5 +1,5 @@
 /** `when` and `flow`. */
-import { endBatch, globalState, startBatch } from "./core.js";
+import { runAction } from "./core.js";
 import { type Disposer, Reaction, runAsAction } from "./reaction.js";
 
 export interface WhenOptions {
@@ -111,15 +111,7 @@ type AnyGenerator = Generator<unknown, unknown, unknown>;
 
 /** Run one generator step as an action (batched, untracked). */
 function step(fn: () => IteratorResult<unknown, unknown>) {
-	startBatch();
-	const outer = globalState.tracking;
-	globalState.tracking = null;
-	try {
-		return fn();
-	} finally {
-		globalState.tracking = outer;
-		endBatch();
-	}
+	return runAction(fn);
 }
 
 /**

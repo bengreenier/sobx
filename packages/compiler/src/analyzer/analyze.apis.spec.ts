@@ -222,10 +222,10 @@ describe("action()", () => {
 	it("reports other API members", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const a = observable.array([]);
+			const a = observable.object({});
 		`);
 		expect(codes(mod)).toEqual(["unsupported-api"]);
-		expect(mod.diagnostics[0]?.message).toContain("observable.array");
+		expect(mod.diagnostics[0]?.message).toContain("observable.object");
 	});
 
 	it("accepts comparer anywhere", () => {

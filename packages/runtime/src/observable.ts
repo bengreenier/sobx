@@ -3,16 +3,22 @@
  * `makeAutoObservable()`, the annotations (`observable.ref`, `computed.struct`,
  * `action.bound`, ...), and standard (2022.3) decorators.
  *
- * Observable properties become accessors backed by a {@link ProxyLike}, so they are tracked
- * by computeds and reactions. This is the general (slower) path; the sobx compiler turns
- * local object observables it can fully see into a plain `ProxyLike` instead.
+ * Observable properties become accessors backed by a {@link ProxyLike} (sobx never uses `Proxy`).
+ * Keys added later go through the explicit API (`set`, `remove`, `has`, `keys`; see `api.ts`),
+ * which the compiler emits for code it can see. Deep observables convert the values put into them
+ * (plain objects, arrays, Maps and Sets). This is the general path; the sobx compiler turns local
+ * object observables it can fully see into a plain `ProxyLike` instead.
  */
 
 import { createFlow, type FlowPromise } from "./async.js";
 import {
+	type ArrayOptions,
 	type BoxOptions,
 	type CollectionOptions,
+	createObservableArray,
 	enhance,
+	isPlainObject,
+	type ObservableArray,
 	ObservableBox,
 	ObservableMap,
 	ObservableSet,
@@ -22,7 +28,17 @@ import {
 	type ComputedOptions,
 	createComputed,
 } from "./computed.js";
-import { deepEqual, endBatch, globalState, startBatch } from "./core.js";
+import {
+	convertingTo,
+	deepEqual,
+	endBatch,
+	globalState,
+	hooks,
+	notifyOwners,
+	observableValues,
+	runAction,
+	startBatch,
+} from "./core.js";
 import { ProxyLike } from "./proxy-like.js";
 
 type AnyRecord = Record<PropertyKey, unknown>;
@@ -39,11 +55,14 @@ export interface Annotation {
 export interface ObservableOptions {
 	/** Bind inferred actions to the object. */
 	autoBind?: boolean;
-	/** Accepted for compatibility. Observable properties are shallow. */
+	/**
+	 * Convert values put into observable properties (plain objects, arrays, Maps, Sets) into
+	 * observables. Default `true`; `false` makes inferred properties `observable.ref`.
+	 */
 	deep?: boolean;
 	/** For debugging; not used. */
 	name?: string;
-	/** Accepted for compatibility; objects are never wrapped in a `Proxy`. */
+	/** Accepted for MobX compatibility and ignored: sobx never uses `Proxy`. */
 	proxy?: boolean;
 }
 
@@ -85,6 +104,7 @@ function administration(target: object): ProxyLike<AnyRecord> {
 		// Values are enhanced per annotation, not by the store.
 		adm = new ProxyLike<AnyRecord>({}, { deep: false });
 		Object.defineProperty(target, ADMINISTRATION, { value: adm });
+		observableValues.add(target);
 	}
 	return adm;
 }
@@ -115,17 +135,28 @@ export function createAction<A extends unknown[], R>(
 	fn: (...args: A) => R,
 	untrackedReads = true,
 ): (...args: A) => R {
-	return function (this: unknown, ...args: A): R {
+	const wrapped = function (this: unknown, ...args: A): R {
 		startBatch();
+		globalState.allowStateChanges++;
 		const outer = globalState.tracking;
 		if (untrackedReads) globalState.tracking = null;
 		try {
 			return fn.apply(this, args);
 		} finally {
 			globalState.tracking = outer;
+			globalState.allowStateChanges--;
 			endBatch();
 		}
 	};
+	actions.add(wrapped);
+	return wrapped;
+}
+
+const actions = new WeakSet<object>();
+
+/** Whether `fn` was created by `action()` / an action annotation. */
+export function isAction(fn: unknown): boolean {
+	return typeof fn === "function" && actions.has(fn);
 }
 
 function describe(target: object, key: PropertyKey): PropertyDescriptor | null {
@@ -145,13 +176,20 @@ function isGenerator(fn: unknown): boolean {
 	return name === "GeneratorFunction" || name === "AsyncGeneratorFunction";
 }
 
-function infer(descriptor: PropertyDescriptor, autoBind: boolean): Annotation {
+function infer(
+	descriptor: PropertyDescriptor,
+	options: ObservableOptions,
+): Annotation {
+	const autoBind = !!options.autoBind;
 	if (descriptor.get) return { kind: "computed" };
 	if (isGenerator(descriptor.value)) return { kind: "flow", bound: autoBind };
 	if (typeof descriptor.value === "function") {
 		return { kind: "autoAction", bound: autoBind };
 	}
-	return { kind: "observable", modifier: "deep" };
+	return {
+		kind: "observable",
+		modifier: options.deep === false ? "ref" : "deep",
+	};
 }
 
 function annotationOf(value: AnnotationValue, key: PropertyKey): Annotation {
@@ -228,7 +266,7 @@ function apply(
 			Object.defineProperty(target, key, {
 				value: wrapped,
 				writable: true,
-				enumerable: false,
+				enumerable: descriptor.enumerable,
 				configurable: true,
 			});
 			return;
@@ -242,7 +280,7 @@ function apply(
 			Object.defineProperty(target, key, {
 				value: createFlow(bound ? fn.bind(target) : fn),
 				writable: true,
-				enumerable: false,
+				enumerable: descriptor.enumerable,
 				configurable: true,
 			});
 			return;
@@ -250,11 +288,16 @@ function apply(
 	}
 }
 
-/** Observable values (deep / shallow) make a plain Map / Set observable, as in MobX. */
+/**
+ * How an observable property converts values put into it, as in MobX: `deep` makes plain
+ * objects, arrays, Maps and Sets observable (deeply); `shallow` makes them observable without
+ * converting their contents; `ref` and `struct` store values as they are.
+ */
 function enhancerFor(annotation: Annotation): <V>(value: V) => V {
-	return annotation.modifier === "deep" || annotation.modifier === "shallow"
-		? enhance
-		: (value) => value;
+	if (annotation.modifier === "deep") return (value) => enhance(value, true);
+	if (annotation.modifier === "shallow")
+		return (value) => enhance(value, false);
+	return (value) => value;
 }
 
 /**
@@ -277,9 +320,7 @@ export function makeObservable<T extends object>(
 			);
 		}
 		const annotation =
-			value === true
-				? infer(descriptor, !!options.autoBind)
-				: annotationOf(value, key);
+			value === true ? infer(descriptor, options) : annotationOf(value, key);
 		apply(target, key, annotation, descriptor, options);
 	}
 	return target;
@@ -319,7 +360,7 @@ export function makeAutoObservable<T extends object>(
 			const descriptor = describe(target, key) as PropertyDescriptor;
 			const annotation =
 				value === undefined || value === true
-					? infer(descriptor, !!options.autoBind)
+					? infer(descriptor, options)
 					: annotationOf(value, key);
 			apply(target, key, annotation, descriptor, options);
 		}
@@ -330,12 +371,12 @@ export function makeAutoObservable<T extends object>(
 function createObservableObject<T extends object>(
 	value: T,
 	overrides?: AnnotationsMap<T>,
-	options?: ObservableOptions,
+	options: ObservableOptions = {},
 ): T {
 	if (Array.isArray(value)) {
-		throw new Error(
-			"sobx: observable arrays are not supported yet; use a plain object, a Map or a Set.",
-		);
+		return createObservableArray(value, {
+			deep: options.deep,
+		}) as unknown as T;
 	}
 	if (value instanceof Map) {
 		return new ObservableMap(value, options) as unknown as T;
@@ -343,14 +384,14 @@ function createObservableObject<T extends object>(
 	if (value instanceof Set) {
 		return new ObservableSet(value, options) as unknown as T;
 	}
-	const proto =
-		typeof value === "object" && value !== null
-			? Object.getPrototypeOf(value)
-			: undefined;
-	if (proto !== Object.prototype && proto !== null) {
-		throw new Error("sobx: observable() only supports plain objects.");
+	if (observableValues.has(value)) return value;
+	if (!isPlainObject(value)) {
+		throw new Error(
+			"sobx: observable() supports plain objects, arrays, Maps and Sets.",
+		);
 	}
-	const result = Object.create(proto) as T;
+	// Accessors only: sobx never uses `Proxy` (the `proxy` option is accepted and ignored).
+	const result = Object.create(Object.getPrototypeOf(value)) as T;
 	for (const key of Reflect.ownKeys(value)) {
 		Object.defineProperty(
 			result,
@@ -358,7 +399,79 @@ function createObservableObject<T extends object>(
 			Object.getOwnPropertyDescriptor(value, key) as PropertyDescriptor,
 		);
 	}
-	return makeAutoObservable(result, overrides, options);
+	// Registered before its values are converted, so cyclic / shared values convert once.
+	administration(result);
+	return convertingTo(value, result, () =>
+		makeAutoObservable(result, overrides, options),
+	);
+}
+
+// A module side effect that deep conversion (arrays, Maps, ProxyLike...) depends on: keep this
+// module free of `"sideEffects": false` (or move the registration) so bundlers don't drop it.
+hooks.object = (value, deep) =>
+	createObservableObject(value, undefined, { deep });
+
+/** Whether `value` is an observable object (`observable({...})`, a class made observable, or a `ProxyLike`). */
+export function isObservableObject(value: unknown): boolean {
+	if (typeof value !== "object" || value === null) return false;
+	return value instanceof ProxyLike || Object.hasOwn(value, ADMINISTRATION);
+}
+
+/**
+ * @internal The store behind an observable object's properties (accessor-based objects and
+ * classes), or `undefined` if `value` isn't one.
+ */
+export function administrationOf(
+	value: object,
+): ProxyLike<AnyRecord> | undefined {
+	return (value as { [ADMINISTRATION]?: ProxyLike<AnyRecord> })[ADMINISTRATION];
+}
+
+/**
+ * @internal Add an observable property to an accessor-based observable object (`set()` for a
+ * new key): deep, like the properties `observable()` infers. Notifies readers of the key, of the
+ * object's keys, and the object's owners.
+ */
+export function addObservableProperty(
+	target: object,
+	key: PropertyKey,
+	value: unknown,
+): void {
+	const adm = administration(target);
+	const prepare = enhancerFor({ kind: "observable", modifier: "deep" });
+	Object.defineProperty(target, key, {
+		get: () => adm.get(key),
+		set: (next) => {
+			adm.set(key, prepare(next));
+		},
+		enumerable: true,
+		configurable: true,
+	});
+	startBatch();
+	try {
+		adm.set(key, prepare(value));
+		notifyOwners(target);
+	} finally {
+		endBatch();
+	}
+}
+
+/** @internal Remove an observable property (`remove()`): notifies like {@link addObservableProperty}. */
+export function removeObservableProperty(
+	target: object,
+	key: PropertyKey,
+): void {
+	const adm = administrationOf(target);
+	startBatch();
+	try {
+		delete (target as AnyRecord)[key];
+		if (adm) {
+			adm.delete(key);
+		}
+		notifyOwners(target);
+	} finally {
+		endBatch();
+	}
 }
 
 /** Attach `annotation` to `fn`, so it can be used in annotation maps. */
@@ -468,6 +581,7 @@ export type MethodAnnotation = <This, A extends unknown[], R>(
 ) => (this: This, ...args: A) => R;
 
 export interface ObservableFn extends AccessorAnnotation {
+	<T>(value: T[], overrides?: null, options?: ArrayOptions): ObservableArray<T>;
 	<K, V>(
 		value: Map<K, V>,
 		overrides?: null,
@@ -490,6 +604,11 @@ export interface ObservableFn extends AccessorAnnotation {
 		entries?: Iterable<readonly [K, V]> | Record<string, V> | null,
 		options?: CollectionOptions,
 	): ObservableMap<K, V>;
+	/** `observable.array(values?, options?)`: an observable array. */
+	array<T>(
+		values?: Iterable<T> | null,
+		options?: ArrayOptions,
+	): ObservableArray<T>;
 	/** `observable.set(values?, options?)`: an observable Set. */
 	set<T>(
 		values?: Iterable<T> | null,
@@ -549,6 +668,8 @@ observable.map = <K, V>(
 		options,
 	);
 observable.set = (values, options) => new ObservableSet(values, options);
+observable.array = (values, options) =>
+	createObservableArray(values ?? [], options);
 
 export interface ComputedFn extends GetterAnnotation {
 	<T>(fn: () => T, options?: ComputedOptions<T>): Computed<T>;
@@ -691,13 +812,5 @@ flow.bound = annotate(
 
 /** Run `fn` now as an action (batched, untracked) and return its result. */
 export function runInAction<T>(fn: () => T): T {
-	startBatch();
-	const outer = globalState.tracking;
-	globalState.tracking = null;
-	try {
-		return fn();
-	} finally {
-		globalState.tracking = outer;
-		endBatch();
-	}
+	return runAction(fn);
 }

@@ -8,6 +8,7 @@ import {
 	ProxyLike,
 	reaction,
 	runInAction,
+	toJS,
 	untracked,
 } from "./index.js";
 
@@ -278,8 +279,9 @@ describe("observable()", () => {
 		s.inc();
 		s.a = 10;
 		expect(seen).toEqual([2, 4, 20]);
-		expect(Object.keys(s)).toEqual(["a"]);
-		expect({ ...s }).toEqual({ a: 10 });
+		// As in MobX: methods stay enumerable, computeds don't.
+		expect(Object.keys(s)).toEqual(["a", "inc"]);
+		expect(toJS(s)).toEqual({ a: 10 });
 	});
 
 	it("respects overrides and autoBind", () => {
@@ -313,8 +315,7 @@ describe("observable()", () => {
 		expect(run).toHaveBeenCalledTimes(2);
 	});
 
-	it("rejects arrays and class instances", () => {
-		expect(() => observable([1] as unknown as object)).toThrow(/arrays/);
+	it("rejects class instances", () => {
 		expect(() => observable(new (class {})())).toThrow(/plain objects/);
 	});
 });

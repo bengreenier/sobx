@@ -254,7 +254,11 @@ importers:
         specifier: workspace:*
         version: link:../runtime
 
-  packages/runtime: {}
+  packages/runtime:
+    devDependencies:
+      mobx:
+        specifier: ^6.16.1
+        version: 6.16.1
 
 packages:
 

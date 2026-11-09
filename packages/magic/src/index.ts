@@ -12,14 +12,18 @@ export type {
 	Annotation,
 	AnnotationsMap,
 	AnnotationValue,
+	ArrayOptions,
 	AutorunOptions,
 	BoxOptions,
 	CancellablePromise,
 	CollectionOptions,
 	Computed,
 	ComputedOptions,
+	ConfigureOptions,
 	Disposer,
+	EnforceActions,
 	FlowPromise,
+	ObservableArray,
 	ObservableBox,
 	ObservableMap,
 	ObservableOptions,
@@ -51,6 +55,7 @@ export const observable: runtime.ObservableFn = placeholder("observable", [
 	"shallow",
 	"struct",
 	"deep",
+	"array",
 	"box",
 	"map",
 	"set",
@@ -73,3 +78,31 @@ export const comparer: typeof runtime.comparer = {
 	structural: placeholder("comparer.structural"),
 	shallow: placeholder("comparer.shallow"),
 };
+export const toJS = placeholder<typeof runtime.toJS>("toJS");
+export const configure = placeholder<typeof runtime.configure>("configure");
+export const untracked = placeholder<typeof runtime.untracked>("untracked");
+export const isObservable =
+	placeholder<typeof runtime.isObservable>("isObservable");
+export const isObservableArray =
+	placeholder<typeof runtime.isObservableArray>("isObservableArray");
+export const isObservableObject =
+	placeholder<typeof runtime.isObservableObject>("isObservableObject");
+export const isObservableMap =
+	placeholder<typeof runtime.isObservableMap>("isObservableMap");
+export const isObservableSet =
+	placeholder<typeof runtime.isObservableSet>("isObservableSet");
+export const isBoxedObservable =
+	placeholder<typeof runtime.isBoxedObservable>("isBoxedObservable");
+export const isComputed = placeholder<typeof runtime.isComputed>("isComputed");
+export const isAction = placeholder<typeof runtime.isAction>("isAction");
+export const isFlowCancellationError = placeholder<
+	typeof runtime.isFlowCancellationError
+>("isFlowCancellationError");
+/** sobx's explicit API (same names and semantics as MobX's object API functions). */
+export const set = placeholder<typeof runtime.set>("set");
+export const remove = placeholder<typeof runtime.remove>("remove");
+export const has = placeholder<typeof runtime.has>("has");
+export const get = placeholder<typeof runtime.get>("get");
+export const keys = placeholder<typeof runtime.keys>("keys");
+export const values = placeholder<typeof runtime.values>("values");
+export const entries = placeholder<typeof runtime.entries>("entries");

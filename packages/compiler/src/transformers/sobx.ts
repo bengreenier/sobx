@@ -12,7 +12,7 @@ import {
 import {
 	compileUnit,
 	DEFAULT_MODULE_SPECIFIER,
-	proxyLikeImport,
+	runtimeImport,
 	SobxCompileError,
 } from "../transform.js";
 
@@ -118,9 +118,8 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 				files.delete(id);
 				break;
 			}
-			if (state?.needsProxyLike) {
-				s.prepend(`${proxyLikeImport(state.plan.proxyName)}\n`);
-			}
+			const declaration = state && runtimeImport(state.plan, state);
+			if (declaration) s.prepend(`${declaration}\n`);
 		},
 		// biome-ignore lint/suspicious/noExplicitAny: unplugin-ast's Node type comes from its own @babel/types copy
 	} as Transformer<any>;

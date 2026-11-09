@@ -1,12 +1,20 @@
-import type { DiagnosticCode, Options, SobxModule, Span } from "@sobx/ast";
-import type { CompilePlan } from "./plan.js";
+import type {
+	DiagnosticCode,
+	ObservableId,
+	Options,
+	SobxModule,
+	Span,
+} from "@sobx/ast";
+import { type CompilePlan, spanKey } from "./plan.js";
 
 /** Codes the compiler adds on top of the analyzer's. */
 export type CompilerDiagnosticCode =
 	/** An option the runtime doesn't implement. */
 	| "unsupported-option"
 	/** An observable left to the runtime (accessor-based) instead of the `ProxyLike` fast path. */
-	| "runtime-observable";
+	| "runtime-observable"
+	/** A write to an observable that would not be observed and couldn't be compiled. */
+	| "uncompiled-write";
 
 export type CompileDiagnosticCode = DiagnosticCode | CompilerDiagnosticCode;
 export type CompileSeverity = "error" | "warning" | "info";
@@ -30,18 +38,17 @@ export type DiagnosticsConfig = Partial<
  */
 export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 	{
-		// Would fail or behave differently at runtime.
+		// Would fail at runtime.
 		"unknown-import": "error",
 		"default-import": "error",
 		"unsupported-api": "error",
 		"invalid-arguments": "error",
-		"deep-mutation": "error",
-		"observable-collection": "error",
+		"deep-mutation": "warning",
 		"invalid-annotation": "error",
 		"unknown-annotation-key": "error",
 		"missing-annotations": "error",
 		"unsupported-option": "error",
-		// Probably mistakes, as in MobX.
+		// Probably mistakes.
 		"write-in-derivation": "warning",
 		"after-await": "warning",
 		// Handled by the runtime.
@@ -58,6 +65,7 @@ export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 		"make-observable-outside-constructor": "info",
 		"unresolved-import": "info",
 		"runtime-observable": "info",
+		"uncompiled-write": "error",
 		"opaque-observable": "info",
 	};
 
@@ -68,15 +76,11 @@ const SUPPORTED_OPTIONS = {
 	when: ["timeout", "name"],
 	computed: ["equals", "name", "keepAlive"],
 	observable: ["autoBind", "deep", "name", "proxy"],
+	"observable.array": ["deep", "name"],
 	"observable.box": ["equals", "deep", "name"],
 	"observable.map": ["deep", "name"],
 	"observable.set": ["deep", "name"],
 } as const;
-
-const SPECIFIC_MESSAGES: Partial<Record<CompileDiagnosticCode, string>> = {
-	"deep-mutation":
-		"sobx observables are shallow: mutating a nested object or array is not observed. Replace the value instead (e.g. `store.items = [...store.items, item]`).",
-};
 
 /** The compile diagnostics for a module: the analyzer's, re-graded, plus the compiler's own. */
 export function compileDiagnostics(
@@ -91,10 +95,31 @@ export function compileDiagnostics(
 		out.push({ code, severity, message, span });
 	};
 
+	const explicitApi =
+		" sobx doesn't use Proxy, so this isn't observed: use the explicit API instead (set, remove, has, get, keys, values, entries from @sobx/magic).";
 	for (const d of mod.diagnostics) {
-		const extra = SPECIFIC_MESSAGES[d.code];
-		push(d.code, extra ? `${d.message} ${extra}` : d.message, d.span);
+		const rewritable =
+			d.code === "dynamic-key" || d.code === "unsupported-operation";
+		// Rewritten to runtime helpers that are observed.
+		if (rewritable && plan.rewritten.has(spanKey(d.span))) continue;
+		const onRuntimeTarget = (d.related ?? []).some((id) =>
+			plan.runtimeTargets.has(id as ObservableId),
+		);
+		if (d.code === "unsupported-operation" && onRuntimeTarget) {
+			const severity = config[d.code] ?? "error";
+			if (severity !== "off") {
+				out.push({
+					code: d.code,
+					severity,
+					message: d.message + explicitApi,
+					span: d.span,
+				});
+			}
+			continue;
+		}
+		push(d.code, d.message, d.span);
 	}
+	for (const u of plan.uncompiled) push("uncompiled-write", u.message, u.span);
 
 	const checkOptions = (
 		api: keyof typeof SUPPORTED_OPTIONS,
@@ -118,7 +143,7 @@ export function compileDiagnostics(
 	for (const o of mod.observables) {
 		const kind = o.shape.kind;
 		checkOptions(
-			kind === "box" || kind === "map" || kind === "set"
+			kind === "array" || kind === "box" || kind === "map" || kind === "set"
 				? `observable.${kind}`
 				: "observable",
 			o.options,

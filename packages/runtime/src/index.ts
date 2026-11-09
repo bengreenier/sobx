@@ -1,4 +1,21 @@
 export {
+	deleteProperty,
+	entries,
+	entriesOf,
+	get,
+	getProperty,
+	has,
+	hasProperty,
+	keys,
+	keysOf,
+	remove,
+	set,
+	setProperty,
+	updateProperty,
+	values,
+	valuesOf,
+} from "./api.js";
+export {
 	type CancellablePromise,
 	FlowCancellationError,
 	type FlowPromise,
@@ -7,15 +24,17 @@ export {
 	when,
 } from "./async.js";
 export {
+	type ArrayOptions,
 	type BoxOptions,
 	type CollectionOptions,
 	comparer,
+	ObservableArray,
 	ObservableBox,
 	ObservableMap,
 	ObservableSet,
 } from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
-export { batch, untracked } from "./core.js";
+export { batch, type EnforceActions, untracked } from "./core.js";
 export {
 	type AccessorAnnotation,
 	type ActionFn,
@@ -29,6 +48,7 @@ export {
 	type FlowFn,
 	flow,
 	type GetterAnnotation,
+	isAction,
 	type MethodAnnotation,
 	makeAutoObservable,
 	makeObservable,
@@ -51,3 +71,15 @@ export {
 	type ReactionOptions,
 	reaction,
 } from "./reaction.js";
+export {
+	type ConfigureOptions,
+	configure,
+	isBoxedObservable,
+	isComputed,
+	isObservable,
+	isObservableArray,
+	isObservableMap,
+	isObservableObject,
+	isObservableSet,
+	toJS,
+} from "./utils.js";

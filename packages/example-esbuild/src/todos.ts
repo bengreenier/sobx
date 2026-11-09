@@ -10,6 +10,6 @@ export class Todos {
 	}
 
 	@action add(item: string) {
-		this.items = [...this.items, item];
+		this.items.push(item); // arrays are deep observables
 	}
 }

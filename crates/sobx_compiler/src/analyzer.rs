@@ -29,9 +29,30 @@ const MODELED: &[&str] = &[
 /// Recognized APIs whose uses are not analyzed (none at the moment).
 const UNMODELED: &[&str] = &[];
 /// Plain values (not calls) that are recognized and allowed anywhere.
-const VALUES: &[&str] = &["comparer"];
+const VALUES: &[&str] = &[
+    "comparer",
+    "configure",
+    "entries",
+    "get",
+    "has",
+    "isAction",
+    "isBoxedObservable",
+    "isComputed",
+    "isFlowCancellationError",
+    "isObservable",
+    "isObservableArray",
+    "isObservableMap",
+    "isObservableObject",
+    "isObservableSet",
+    "keys",
+    "remove",
+    "set",
+    "toJS",
+    "untracked",
+    "values",
+];
 /// `observable.<kind>(...)` constructors.
-const OBSERVABLE_VALUES: &[&str] = &["box", "map", "set"];
+const OBSERVABLE_VALUES: &[&str] = &["array", "box", "map", "set"];
 const ANNOTATING: &[&str] = &["observable", "makeObservable", "makeAutoObservable"];
 const OBJECT_ENUMERATORS: &[&str] = &["keys", "values", "entries", "assign", "getOwnPropertyNames", "freeze"];
 const MUTATING_ARRAY_METHODS: &[&str] =
@@ -199,6 +220,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             "observable",
             "makeObservable",
             "makeAutoObservable",
+            "observable.array",
             "observable.box",
             "observable.map",
             "observable.set",
@@ -487,7 +509,12 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 vec![],
             );
         }
-        if let Some(kind) = first.and_then(collection_kind) {
+        let kind = match first {
+            Some(Argument::ArrayExpression(_)) => Some("array"),
+            Some(arg) => collection_kind(arg),
+            None => None,
+        };
+        if let Some(kind) = kind {
             self.create_value_observable(call_id, kind, 2);
             return;
         }
@@ -515,8 +542,18 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         let id = self.next_observable_id();
         let span = self.span(call_id);
         let options = call.arguments.get(options_index).map(|a| self.options(a));
-        let binding = self.resolve_result_binding(self.outer(call_id)).map(|(_, b)| b);
+        let outer = self.outer(call_id);
+        let resolved = self.resolve_result_binding(outer);
+        // Arrays: record their accesses, so the compiler can rewrite index / `length` writes
+        // (there is no Proxy to observe them). Maps, Sets and boxes are used through methods.
+        if kind == "array"
+            && let Some((symbol, b)) = &resolved
+        {
+            self.register_observable(*symbol, b, outer, &id);
+        }
+        let binding = resolved.map(|(_, b)| b);
         let what = match kind {
+            "array" => "Observable array",
             "box" => "Observable box",
             "map" => "Observable Map",
             _ => "Observable Set",
@@ -534,6 +571,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             source: "observable",
             target: Target::Object { binding },
             shape: match kind {
+                "array" => Shape::Array,
                 "box" => Shape::Box,
                 "map" => Shape::Map,
                 _ => Shape::Set,
@@ -607,19 +645,6 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             }
             None => Shape::Unknown,
         };
-        if let Some(value) =
-            call.arguments.first().filter(|v| object.is_none() && matches!(v, Argument::ArrayExpression(_)))
-        {
-            let value_span = self.span_of(value.span());
-            self.diagnose(
-                "observable-collection",
-                "error",
-                "Observable arrays are not supported yet; use a plain object, a Map or a Set.".to_string(),
-                value_span,
-                vec![id.clone()],
-            );
-        }
-
         let outer = self.outer(call_id);
         let resolved = self.resolve_result_binding(outer);
         if let Some((symbol, binding)) = &resolved {
@@ -1962,6 +1987,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         if top == first {
             return;
         }
+        // Deep (default) and shallow properties make nested objects, arrays, Maps and Sets
+        // observable; only `observable.ref` / `observable.struct` store values as they are.
+        let Some(modifier) = self.ref_modifier(observable, key) else { return };
         let name = match key {
             AccessKey::Static { name } => name.clone(),
             AccessKey::Dynamic => "<dynamic>".into(),
@@ -1971,7 +1999,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             self.diagnose(
                 "deep-mutation",
                 "warning",
-                format!("Mutation of a value nested in observable property \"{name}\" is not tracked."),
+                format!(
+                    "\"{name}\" is observable.{modifier}, so its value is not observable; this mutation is not tracked."
+                ),
                 s,
                 vec![observable.into()],
             );
@@ -1995,12 +2025,22 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 "deep-mutation",
                 "warning",
                 format!(
-                    "Method call on {} nested in observable property \"{name}\" may mutate it; this is not tracked.",
-                    kind.unwrap_or_default()
+                    "\"{name}\" is observable.{modifier}, so its value is not observable; this method call may mutate it without being tracked."
                 ),
                 s,
                 vec![observable.into()],
             );
+        }
+    }
+
+    /// `"ref"` / `"struct"` if the property stores values as they are (not made observable).
+    fn ref_modifier(&self, observable: &str, key: &AccessKey) -> Option<&'static str> {
+        let AccessKey::Static { name } = key else { return None };
+        let obs = self.observables.get(id_index(observable))?;
+        let Shape::Object { members, .. } = &obs.shape else { return None };
+        match members.iter().find(|m| &m.key == name && !m.is_static)?.annotation {
+            Some(Annotation::Observable { modifier }) if matches!(modifier, "ref" | "struct") => Some(modifier),
+            _ => None,
         }
     }
 
@@ -2805,6 +2845,7 @@ fn collection_kind(arg: &Argument<'_>) -> Option<&'static str> {
 
 fn observable_value_key(kind: &str) -> &'static str {
     match kind {
+        "array" => "observable.array",
         "box" => "observable.box",
         "map" => "observable.map",
         _ => "observable.set",

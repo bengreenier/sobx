@@ -10,7 +10,7 @@
  */
 
 /** Version of the IR shape. Bump on breaking changes to these types. */
-export const IR_VERSION = 3;
+export const IR_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -91,8 +91,28 @@ export type ModeledApi =
  */
 export type UnmodeledApi = never;
 
-/** Plain values that are recognized and may be used anywhere (e.g. `comparer.structural`). */
-export type ValueApi = "comparer";
+/** Recognized exports that are used as values or utilities and not analyzed (e.g. `comparer.structural`, `toJS(x)`). */
+export type ValueApi =
+	| "comparer"
+	| "configure"
+	| "entries"
+	| "get"
+	| "has"
+	| "isAction"
+	| "isBoxedObservable"
+	| "isComputed"
+	| "isFlowCancellationError"
+	| "isObservable"
+	| "isObservableArray"
+	| "isObservableMap"
+	| "isObservableObject"
+	| "isObservableSet"
+	| "keys"
+	| "remove"
+	| "set"
+	| "toJS"
+	| "untracked"
+	| "values";
 
 export type KnownApi = ModeledApi | UnmodeledApi | ValueApi;
 
@@ -190,7 +210,8 @@ export type ObservableShape =
 			/** True when the literal/class has spreads or computed keys, so `members` is incomplete. */
 			open: boolean;
 	  }
-	/** `observable.box(v)`, `observable.map()` / `observable(new Map())`, `observable.set()` / `observable(new Set())`. Their reads and writes are tracked by the runtime, not analyzed. */
+	/** `observable([...])` / `observable.array()`, `observable.box(v)`, `observable.map()` / `observable(new Map())`, `observable.set()` / `observable(new Set())`. Their reads and writes are tracked by the runtime, not analyzed. */
+	| { kind: "array" }
 	| { kind: "box" }
 	| { kind: "map" }
 	| { kind: "set" }
@@ -470,9 +491,7 @@ export type DiagnosticCode =
 	| "api-not-called"
 	/** An API was called with missing / malformed arguments. */
 	| "invalid-arguments"
-	/** `observable([...])`: observable arrays are not supported. */
-	| "observable-collection"
-	/** An observable box, Map or Set: tracked by the runtime, its reads and writes are not analyzed. */
+	/** An observable array, box, Map or Set: tracked by the runtime, its reads and writes are not analyzed. */
 	| "opaque-observable"
 	/** `observable(...)` / `computed(...)` result not bound to a simple identifier. */
 	| "unbound-observable"
@@ -488,7 +507,7 @@ export type DiagnosticCode =
 	| "observable-reassigned"
 	/** An access inside a function nested in a tracked function (may not run during tracking). */
 	| "untracked-nested-read"
-	/** A mutation through a value nested in an observable property. */
+	/** A mutation through the value of an `observable.ref` / `observable.struct` property (not observable). */
 	| "deep-mutation"
 	/** A write inside a tracked function (computed / reaction data / autorun). */
 	| "write-in-derivation"

@@ -21,7 +21,7 @@ pnpm add @sobx/ast
 
 ## The IR
 
-Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `when`, `action`, `runInAction`, `flow`. `comparer` is recognized as a value. Observable boxes, Maps and Sets (`observable.box()`, `observable.map()`, `observable(new Map())`, ...) are recorded as observables with a `box` / `map` / `set` shape; their reads and writes are left to the runtime (`opaque-observable`, info). Observable arrays are reported (`observable-collection`).
+Modeled APIs: `observable`, `makeObservable`, `makeAutoObservable`, `computed`, `reaction`, `autorun`, `when`, `action`, `runInAction`, `flow`. Utilities (`comparer`, `toJS`, `configure`, `untracked`, the `isObservable*` checks, the explicit API `set` / `remove` / `has` / `get` / `keys` / `values` / `entries`) are recognized and not analyzed. Observable arrays, boxes, Maps and Sets (`observable([])`, `observable.box()`, `observable.map()`, `observable(new Map())`, ...) are recorded as observables with an `array` / `box` / `map` / `set` shape (`opaque-observable`, info); accesses of arrays stored in a variable are recorded (index, `length`, methods), those of boxes, Maps and Sets are left to the runtime. Mutating the value of an `observable.ref` / `observable.struct` property (which is not observable) is reported as `deep-mutation`.
 
 A `SobxModule` contains:
 

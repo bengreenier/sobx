@@ -10,7 +10,9 @@ import {
 	type CompilePlan,
 	emptyPlan,
 	finalizePlan,
+	helperName,
 	newRewriteState,
+	type RewriteState,
 	RUNTIME_MODULE,
 	rewrite,
 } from "./plan.js";
@@ -89,23 +91,55 @@ export function transformSobx(
 	const state = newRewriteState();
 	const ast = rewrite(program, plan, state) as t.Program;
 	return {
-		ast: state.needsProxyLike ? injectProxyLike(ast, plan.proxyName) : ast,
+		ast: injectRuntimeImports(ast, plan, state),
 		diagnostics,
 		needsProxyLike: state.needsProxyLike,
 	};
 }
 
-/** `import { ProxyLike } from "@sobx/runtime";` (aliased if the name is taken). */
-export function proxyLikeImport(name: string): string {
-	return name === "ProxyLike"
-		? `import { ProxyLike } from "${RUNTIME_MODULE}";`
-		: `import { ProxyLike as ${name} } from "${RUNTIME_MODULE}";`;
+/** The runtime bindings the rewritten code uses: `[imported, local]` pairs. */
+function runtimeBindings(
+	plan: CompilePlan,
+	state: RewriteState,
+): Array<[string, string]> {
+	const bindings: Array<[string, string]> = [];
+	if (state.needsProxyLike) bindings.push(["ProxyLike", plan.proxyName]);
+	for (const name of [...state.helpers].sort()) {
+		bindings.push([name, helperName(name)]);
+	}
+	return bindings;
 }
 
-/** Add the `ProxyLike` import after the program's existing imports. */
-function injectProxyLike(program: t.Program, name: string): t.Program {
+/**
+ * The `import { ... } from "@sobx/runtime";` the rewritten code needs (`ProxyLike`, helpers),
+ * or `undefined` if it needs none.
+ */
+export function runtimeImport(
+	plan: CompilePlan,
+	state: RewriteState,
+): string | undefined {
+	const bindings = runtimeBindings(plan, state);
+	if (bindings.length === 0) return undefined;
+	const specifiers = bindings
+		.map(([imported, local]) =>
+			imported === local ? imported : `${imported} as ${local}`,
+		)
+		.join(", ");
+	return `import { ${specifiers} } from "${RUNTIME_MODULE}";`;
+}
+
+/** Add the runtime import after the program's existing imports. */
+function injectRuntimeImports(
+	program: t.Program,
+	plan: CompilePlan,
+	state: RewriteState,
+): t.Program {
+	const bindings = runtimeBindings(plan, state);
+	if (bindings.length === 0) return program;
 	const declaration = t.importDeclaration(
-		[t.importSpecifier(t.identifier(name), t.identifier("ProxyLike"))],
+		bindings.map(([imported, local]) =>
+			t.importSpecifier(t.identifier(local), t.identifier(imported)),
+		),
 		t.stringLiteral(RUNTIME_MODULE),
 	);
 	const body = [...program.body];

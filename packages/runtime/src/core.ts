@@ -35,11 +35,161 @@ export interface Tracking {
 	versions: Map<VersionedComputed, number> | null;
 }
 
+export type EnforceActions = "never" | "observed" | "always";
+
 /** Mutable global state. A single object so that every module sees the same values. */
 export const globalState = {
 	/** The derivation currently collecting dependencies, if any. */
 	tracking: null as Tracking | null,
 	batchDepth: 0,
+	/** Greater than zero inside actions, flows steps and reactions, where state may change. */
+	allowStateChanges: 0,
+	/** Like MobX's `configure({ enforceActions })`. Checked in development builds only. */
+	enforceActions: "observed" as EnforceActions,
+};
+
+// The runtime targets any JS environment.
+declare const console: { warn(...args: unknown[]): void };
+declare const process: { env: Record<string, string | undefined> };
+
+/** Development build? Bundlers replace `process.env.NODE_ENV`, as they do for MobX. */
+export const DEV: boolean = (() => {
+	try {
+		return process.env.NODE_ENV !== "production";
+	} catch {
+		return true;
+	}
+})();
+
+/**
+ * Warn, like MobX, when an observable is changed outside an action while `enforceActions`
+ * requires one (`"observed"`: only if something observes it; `"always"`: any change).
+ */
+export function checkWrite(dep: Dep | undefined, what: string): void {
+	if (!DEV || globalState.allowStateChanges > 0) return;
+	checkWriteIf(!!dep && dep.observers.size > 0, what);
+}
+
+/** {@link checkWrite}, when the caller knows whether the value is observed. */
+export function checkWriteIf(observed: boolean, what: string): void {
+	if (!DEV || globalState.allowStateChanges > 0) return;
+	const mode = globalState.enforceActions;
+	if (mode === "never") return;
+	if (mode === "observed" && !observed) return;
+	console.warn(
+		`[sobx] Since enforceActions is "${mode}", ${mode === "observed" ? "observed " : ""}observable values must be changed inside actions (action, runInAction, flow). Tried to modify: ${what}`,
+	);
+}
+
+/** Every observable value (arrays, objects, Maps, Sets, boxes, ProxyLike, classes). */
+export const observableValues = new WeakSet<object>();
+
+/**
+ * Plain values being converted to observables, and their observable. Registered before the
+ * contents are converted, so cyclic and shared references convert to the same observable.
+ */
+export const converting = new WeakMap<object, object>();
+
+let conversionDepth = 0;
+const converted: object[] = [];
+
+/**
+ * Run `fill` with `source` registered as converting to `result`. Registrations last until the
+ * outermost conversion ends, so a value referenced from several places in one conversion
+ * becomes a single observable.
+ */
+export function convertingTo<T>(
+	source: unknown,
+	result: object,
+	fill: () => T,
+): T {
+	if (
+		typeof source === "object" &&
+		source !== null &&
+		!converting.has(source)
+	) {
+		converting.set(source, result);
+		converted.push(source);
+	}
+	conversionDepth++;
+	try {
+		return fill();
+	} finally {
+		if (--conversionDepth === 0) {
+			for (const value of converted) converting.delete(value);
+			converted.length = 0;
+		}
+	}
+}
+
+/**
+ * Something that holds an observable value (an object property, a box, a Map value, an array
+ * element). sobx never uses `Proxy`, so some reads of a held value can't be tracked by the value
+ * itself (`array.length`, `array[i]`, a key that doesn't exist yet). Instead, the value tells its
+ * owners when it changes, and they notify whoever read it through them: a derivation that read
+ * `store.items` re-runs when `store.items` is mutated, whatever it did with the array.
+ */
+export interface Owner {
+	ownerChanged(): void;
+	/** Whether anything observes the value through this owner (for `enforceActions`). */
+	ownerObserved(): boolean;
+}
+
+const ownersOf = new WeakMap<object, Set<Owner>>();
+
+/** Record that `owner` holds `value` (if `value` is observable). */
+export function adopt(value: unknown, owner: Owner): void {
+	if (typeof value !== "object" || value === null) return;
+	if (!observableValues.has(value)) return;
+	let owners = ownersOf.get(value);
+	if (!owners) {
+		owners = new Set();
+		ownersOf.set(value, owners);
+	}
+	owners.add(owner);
+}
+
+/** Record that `owner` no longer holds `value`. */
+export function release(value: unknown, owner: Owner): void {
+	if (typeof value !== "object" || value === null) return;
+	ownersOf.get(value)?.delete(owner);
+}
+
+/** Whether anything observes `value` through one of its owners. */
+export function ownersObserved(value: object): boolean {
+	const owners = ownersOf.get(value);
+	if (!owners) return false;
+	for (const owner of owners) if (owner.ownerObserved()) return true;
+	return false;
+}
+
+let notifying: Set<object> | null = null;
+
+/** Tell `value`'s owners that it changed (cycle-safe). */
+export function notifyOwners(value: object): void {
+	const owners = ownersOf.get(value);
+	if (!owners || owners.size === 0) return;
+	const outer = notifying === null;
+	if (outer) notifying = new Set();
+	const seen = notifying as Set<object>;
+	if (seen.has(value)) return;
+	seen.add(value);
+	startBatch();
+	try {
+		for (const owner of [...owners]) owner.ownerChanged();
+	} finally {
+		if (outer) notifying = null;
+		endBatch();
+	}
+}
+
+/**
+ * Hooks filled in by the modules that implement them, so that the value modules can convert
+ * nested values without importing each other.
+ */
+export const hooks = {
+	/** Make a plain object observable (`deep`: whether its own values are deep too). */
+	object: (value: object, _deep: boolean): object => value,
 };
 
 interface Scheduled {
@@ -156,6 +306,21 @@ export function untracked<T>(fn: () => T): T {
 		return fn();
 	} finally {
 		globalState.tracking = outer;
+	}
+}
+
+/** Run `fn` as an action: batched, untracked, and allowed to change state. */
+export function runAction<T>(fn: () => T, untrackedReads = true): T {
+	startBatch();
+	globalState.allowStateChanges++;
+	const outer = globalState.tracking;
+	if (untrackedReads) globalState.tracking = null;
+	try {
+		return fn();
+	} finally {
+		globalState.tracking = outer;
+		globalState.allowStateChanges--;
+		endBatch();
 	}
 }
 

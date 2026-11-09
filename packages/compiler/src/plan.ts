@@ -1,5 +1,5 @@
 import * as t from "@babel/types";
-import type { ObservableId, SobxModule } from "@sobx/ast";
+import type { ObservableId, SobxModule, Span } from "@sobx/ast";
 
 export const RUNTIME_MODULE = "@sobx/runtime";
 
@@ -12,6 +12,9 @@ export interface ProxyObservable {
 	actions: string[];
 }
 
+/** The key of a property operation: a static name, or the member's computed expression. */
+export type KeyRef = { name: string } | { dynamic: true };
+
 /**
  * What to rewrite in a module, keyed by source span (`"start:end"`), derived from the analyzer's
  * IR (and checked against the AST by {@link finalizePlan}).
@@ -20,6 +23,11 @@ export interface ProxyObservable {
  * top of that, local `observable({...})` objects whose every use can be rewritten are compiled
  * to a `ProxyLike` with explicit `get` / `set` calls (the fast path). Every other observable is
  * left to the runtime.
+ *
+ * sobx never uses `Proxy`, so property operations the runtime can't observe by itself (keys
+ * that aren't declared, dynamic keys, `delete`, `in`, `Object.keys`, array index / `length`
+ * writes, writes through nested values) are rewritten to runtime helpers (`getProperty`,
+ * `setProperty`, `hasProperty`, `keysOf`, ...).
  */
 export interface CompilePlan {
 	moduleSpecifier: string;
@@ -41,6 +49,22 @@ export interface CompilePlan {
 	owners: Map<string, ObservableId>;
 	/** Observables left to the runtime, and why. */
 	fallbacks: Map<ObservableId, string>;
+	/** Runtime (accessor-based) object observables and observable arrays. */
+	runtimeTargets: Set<ObservableId>;
+	/** Reads of runtime targets that need `getProperty` (undeclared / dynamic keys, array index / `length`), by member span. */
+	propertyReads: Map<string, KeyRef>;
+	/** Writes of runtime targets that need `setProperty` / `updateProperty`, by target member span. */
+	propertyWrites: Map<string, KeyRef>;
+	/** `delete` of runtime targets' properties (`deleteProperty`), by member span. */
+	propertyDeletes: Map<string, KeyRef>;
+	/** `k in target` / `Object.keys(target)` (and `values` / `entries`) on runtime targets, by expression span. */
+	operations: Set<string>;
+	/** Reads of an observable's property that continue into a nested value (`store.items[0]`), by member span. */
+	pathBases: Set<string>;
+	/** Spans the final rewrite handled (set by {@link finalizePlan}). */
+	rewritten: Set<string>;
+	/** Writes that would not be observed and couldn't be rewritten (set by {@link finalizePlan}). */
+	uncompiled: Array<{ span: Span; message: string }>;
 }
 
 export function spanKey(span: { start?: number | null; end?: number | null }) {
@@ -59,6 +83,14 @@ export function emptyPlan(moduleSpecifier: string): CompilePlan {
 		destructures: new Map(),
 		owners: new Map(),
 		fallbacks: new Map(),
+		runtimeTargets: new Set(),
+		propertyReads: new Map(),
+		propertyWrites: new Map(),
+		propertyDeletes: new Map(),
+		operations: new Set(),
+		pathBases: new Set(),
+		rewritten: new Set(),
+		uncompiled: [],
 	};
 }
 
@@ -155,7 +187,81 @@ export function planFromModule(
 			plan.destructures.delete(key);
 		}
 	}
+	planPropertyOperations(mod, plan);
 	return plan;
+}
+
+/**
+ * Plan the helper rewrites for property operations that wouldn't be observed without a `Proxy`:
+ * on runtime (accessor-based) object observables and observable arrays, and writes through
+ * nested values of any observable.
+ */
+function planPropertyOperations(mod: SobxModule, plan: CompilePlan): void {
+	const compiled = new Set([...plan.proxies.values()].map((p) => p.id));
+	/** Declared keys of runtime objects (`null`: not known, e.g. spreads or `observable(value)`). */
+	const declared = new Map<ObservableId, Set<string> | null>();
+	const arrays = new Set<ObservableId>();
+	for (const o of mod.observables) {
+		if (o.target !== "object" || compiled.has(o.id)) continue;
+		if (o.shape.kind === "array") {
+			arrays.add(o.id);
+			plan.runtimeTargets.add(o.id);
+		} else if (o.shape.kind === "object") {
+			plan.runtimeTargets.add(o.id);
+			declared.set(
+				o.id,
+				o.shape.open
+					? null
+					: new Set(o.shape.members.filter((m) => !m.static).map((m) => m.key)),
+			);
+		} else if (o.shape.kind === "unknown") {
+			plan.runtimeTargets.add(o.id);
+			declared.set(o.id, null);
+		}
+	}
+
+	for (const a of mod.accesses) {
+		if (a.kind === "ComputedRead") continue;
+		const span = spanKey(a.span);
+		if (a.kind === "Read" && a.via === "member" && a.path.length > 0) {
+			plan.pathBases.add(span);
+		}
+		if (!plan.runtimeTargets.has(a.observable)) continue;
+		const key: KeyRef =
+			a.key.kind === "static" ? { name: a.key.name } : { dynamic: true };
+		const isArray = arrays.has(a.observable);
+		const keys = declared.get(a.observable);
+		/** Whether plain property access on this key would not be observed. */
+		const unobserved =
+			a.key.kind !== "static" ||
+			(isArray
+				? a.key.name === "length" || isIndexName(a.key.name)
+				: keys == null || !keys.has(a.key.name));
+		if (a.kind === "Read") {
+			if (a.via === "member" && !a.called && unobserved) {
+				plan.propertyReads.set(span, key);
+			}
+		} else if (a.kind === "Write") {
+			if (unobserved || isArray) plan.propertyWrites.set(span, key);
+		} else {
+			plan.propertyDeletes.set(span, key);
+		}
+	}
+
+	for (const d of mod.diagnostics) {
+		if (d.code !== "unsupported-operation") continue;
+		if (
+			(d.related ?? []).some((id) =>
+				plan.runtimeTargets.has(id as ObservableId),
+			)
+		) {
+			plan.operations.add(spanKey(d.span));
+		}
+	}
+}
+
+function isIndexName(name: string): boolean {
+	return /^(0|[1-9]\d*)$/.test(name);
 }
 
 /** Why an observable can't use the `ProxyLike` fast path, if it can't. */
@@ -187,14 +293,143 @@ function fastPathBlocker(o: SobxModule["observables"][number]): string | null {
 /** Mutable state collected while rewriting. */
 export interface RewriteState {
 	needsProxyLike: boolean;
+	/** Runtime helpers used (imported as `__sobx_<name>`). */
+	helpers: Set<string>;
 	/** Planned spans that were rewritten. */
 	consumed: Set<string>;
 	/** Observables whose literal turned out not to fit the fast path. */
 	failed: Map<ObservableId, string>;
+	/** Writes that would not be observed and couldn't be rewritten. */
+	uncompiled: Array<{ span: Span; message: string }>;
 }
 
 export function newRewriteState(): RewriteState {
-	return { needsProxyLike: false, consumed: new Set(), failed: new Map() };
+	return {
+		needsProxyLike: false,
+		helpers: new Set(),
+		consumed: new Set(),
+		failed: new Map(),
+		uncompiled: [],
+	};
+}
+
+/** Local name of an injected runtime helper. */
+export const helperName = (name: string) => `__sobx_${name}`;
+
+function helper(state: RewriteState, name: string, args: t.Expression[]) {
+	state.helpers.add(name);
+	return t.callExpression(t.identifier(helperName(name)), args);
+}
+
+/** A Babel node's location, as an IR span. */
+function irSpan(node: t.Node): Span {
+	const start = node.loc?.start ?? { line: 0, column: 0 };
+	const end = node.loc?.end ?? start;
+	return {
+		start: node.start ?? 0,
+		end: node.end ?? 0,
+		loc: {
+			start: { line: start.line, column: start.column },
+			end: { line: end.line, column: end.column },
+		},
+	};
+}
+
+/** Side-effect free, so it can be evaluated twice (`a`, `this`, `a.b`, `a[0]`, `a[i]`). */
+function isPure(node: t.Node): boolean {
+	if (
+		t.isIdentifier(node) ||
+		t.isThisExpression(node) ||
+		t.isStringLiteral(node) ||
+		t.isNumericLiteral(node)
+	) {
+		return true;
+	}
+	if (t.isMemberExpression(node)) {
+		return isPure(node.object) && (!node.computed || isPure(node.property));
+	}
+	return false;
+}
+
+/** The key expression of `member` (`"name"` for `a.name`, the expression for `a[expr]`). */
+function memberKey(
+	member: t.MemberExpression,
+	rewriteNode: <N extends t.Node>(n: N) => N,
+): t.Expression | undefined {
+	if (t.isPrivateName(member.property)) return undefined;
+	if (!member.computed && t.isIdentifier(member.property)) {
+		return str(member.property.name);
+	}
+	return t.isExpression(member.property)
+		? rewriteNode(member.property)
+		: undefined;
+}
+
+/** Whether `member` reads through an observable property (`store.items[0]`, `this.user.name`). */
+function throughObservable(
+	member: t.MemberExpression,
+	plan: CompilePlan,
+): boolean {
+	let node: t.Node = member.object;
+	while (isMember(node)) {
+		if (plan.pathBases.has(spanKey(node))) return true;
+		node = node.object;
+	}
+	return false;
+}
+
+/**
+ * Rewrite a write to `member` (`=`, compound, `++` / `--`, `delete`) as a runtime helper call.
+ * Returns `undefined` (and records it) if a compound write can't be rewritten safely.
+ */
+function rewritePropertyWrite(
+	node: t.AssignmentExpression | t.UpdateExpression | t.UnaryExpression,
+	member: t.MemberExpression,
+	plan: CompilePlan,
+	state: RewriteState,
+): t.Node | undefined {
+	const r = <N extends t.Node>(n: N) => rewrite(n, plan, state) as N;
+	const key = memberKey(member, r);
+	if (!key || !t.isExpression(member.object)) return undefined;
+	const object = r(member.object);
+	if (t.isUnaryExpression(node)) {
+		return helper(state, "deleteProperty", [object, key]);
+	}
+	if (t.isUpdateExpression(node)) {
+		return helper(state, "updateProperty", [
+			object,
+			key,
+			t.valueToNode(node.operator === "++" ? 1 : -1),
+			t.booleanLiteral(node.prefix),
+		]);
+	}
+	const value = r(node.right);
+	if (node.operator === "=") {
+		return helper(state, "setProperty", [object, key, value]);
+	}
+	// target[key] op= v  ->  setProperty(target, key, getProperty(target, key) op v)
+	if (!isPure(member.object) || (member.computed && !isPure(member.property))) {
+		state.uncompiled.push({
+			span: irSpan(node),
+			message:
+				"This compound assignment to an observable property can't be compiled (its object or key has side effects), so the change would not be observed. Assign to a temporary first, or use set().",
+		});
+		return undefined;
+	}
+	const previous = helper(state, "getProperty", [
+		r(t.cloneNode(member.object) as t.Expression),
+		memberKey(t.cloneNode(member), r) as t.Expression,
+	]);
+	const op = node.operator.slice(0, -1);
+	const next =
+		op === "&&" || op === "||" || op === "??"
+			? t.logicalExpression(op, previous, value)
+			: t.binaryExpression(
+					op as t.BinaryExpression["operator"],
+					previous,
+					value,
+				);
+	return helper(state, "setProperty", [object, key, next]);
 }
 
 const str = (value: string) => t.stringLiteral(value);
@@ -282,8 +517,29 @@ export function rewriteMatch(
 			]);
 		}
 
-		// s.m(...args) -> s.get("m").call(s, ...args)
+		// Object.keys / values / entries(target) -> keysOf / valuesOf / entriesOf(target)
 		const callee = node.callee;
+		if (
+			plan.operations.has(spanKey(node)) &&
+			t.isMemberExpression(callee) &&
+			t.isIdentifier(callee.object, { name: "Object" }) &&
+			t.isIdentifier(callee.property) &&
+			!callee.computed &&
+			node.arguments.length === 1 &&
+			t.isExpression(node.arguments[0])
+		) {
+			const name = {
+				keys: "keysOf",
+				values: "valuesOf",
+				entries: "entriesOf",
+			}[callee.property.name];
+			if (name) {
+				consume(node);
+				return helper(state, name, [r(node.arguments[0])]);
+			}
+		}
+
+		// s.m(...args) -> s.get("m").call(s, ...args)
 		if (
 			isMember(callee) &&
 			plan.calls.has(spanKey(callee)) &&
@@ -313,6 +569,17 @@ export function rewriteMatch(
 		return undefined;
 	}
 
+	if (
+		t.isMemberExpression(node) &&
+		t.isExpression(node.object) &&
+		plan.propertyReads.has(spanKey(node))
+	) {
+		const key = memberKey(node, r);
+		if (!key) return undefined;
+		consume(node);
+		return helper(state, "getProperty", [r(node.object), key]);
+	}
+
 	if (isMember(node) && t.isExpression(node.object)) {
 		const key = plan.reads.get(spanKey(node));
 		if (key === undefined) return undefined;
@@ -322,6 +589,48 @@ export function rewriteMatch(
 			key,
 			t.isOptionalMemberExpression(node) && node.optional,
 		);
+	}
+
+	// key in target -> hasProperty(target, key)
+	if (
+		t.isBinaryExpression(node) &&
+		node.operator === "in" &&
+		plan.operations.has(spanKey(node)) &&
+		t.isExpression(node.left)
+	) {
+		consume(node);
+		return helper(state, "hasProperty", [r(node.right), r(node.left)]);
+	}
+
+	// Writes the runtime can't observe by itself: undeclared / dynamic keys and array index /
+	// `length` of runtime targets, and writes through nested values of any observable.
+	const writeTarget = t.isAssignmentExpression(node)
+		? node.left
+		: t.isUpdateExpression(node) ||
+				(t.isUnaryExpression(node) && node.operator === "delete")
+			? node.argument
+			: undefined;
+	if (
+		t.isMemberExpression(writeTarget) &&
+		!plan.writes.has(spanKey(writeTarget)) &&
+		!plan.deletes.has(spanKey(writeTarget))
+	) {
+		const span = spanKey(writeTarget);
+		const planned = t.isUnaryExpression(node)
+			? plan.propertyDeletes.has(span)
+			: plan.propertyWrites.has(span);
+		if (planned || throughObservable(writeTarget, plan)) {
+			const out = rewritePropertyWrite(
+				node as t.AssignmentExpression | t.UpdateExpression | t.UnaryExpression,
+				writeTarget,
+				plan,
+				state,
+			);
+			if (out) {
+				consume(writeTarget);
+				return out;
+			}
+		}
 	}
 
 	if (t.isAssignmentExpression(node)) {
@@ -487,6 +796,10 @@ export function finalizePlan(
 				);
 			}
 		}
-		if (forced.size === before || attempt > 10) return plan;
+		if (forced.size === before || attempt > 10) {
+			plan.rewritten = state.consumed;
+			plan.uncompiled = state.uncompiled;
+			return plan;
+		}
 	}
 }

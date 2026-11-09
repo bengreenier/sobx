@@ -3,7 +3,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-pub const IR_VERSION: u32 = 3;
+pub const IR_VERSION: u32 = 4;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq)]
 pub struct Position {
@@ -102,6 +102,8 @@ pub enum Shape {
     Object { members: Vec<Member>, open: bool },
     #[serde(rename = "unknown")]
     Unknown,
+    #[serde(rename = "array")]
+    Array,
     #[serde(rename = "box")]
     Box,
     #[serde(rename = "map")]

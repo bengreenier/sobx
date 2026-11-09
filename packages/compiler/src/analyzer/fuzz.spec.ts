@@ -208,6 +208,8 @@ export function program(seed: number): string {
 					`const ${v} = observable.box(0, { equals: comparer.structural }); ${v}.set(1);`,
 					`const ${v} = observable.map(); ${v}.set("k", ${access(s)});`,
 					`const ${v} = observable(new Set()); autorun(() => ${v}.has(1));`,
+					`const ${v} = observable([1, 2]); ${v}.push(${access(s)}); autorun(() => ${v}.length);`,
+					`const ${v} = observable.array([], { deep: false }); ${v}[0] = 1;`,
 				]),
 			);
 		} else {

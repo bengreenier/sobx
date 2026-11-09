@@ -1,5 +1,16 @@
 import { enhance } from "./collections.js";
-import { batch, Dep, type Equals, globalState, reportChanged } from "./core.js";
+import {
+	adopt,
+	checkWrite,
+	Dep,
+	type Equals,
+	globalState,
+	type Owner,
+	observableValues,
+	release,
+	reportChanged,
+	runAction,
+} from "./core.js";
 
 /** Options for {@link ProxyLike}. Emitted by the sobx compiler. */
 export interface ProxyLikeOptions<T> {
@@ -7,7 +18,7 @@ export interface ProxyLikeOptions<T> {
 	getters?: Array<keyof T>;
 	/** Function-valued keys to wrap as actions: their writes are batched. */
 	actions?: Array<keyof T>;
-	/** Make plain Map / Set values observable, like MobX's deep observables. Default `true`. */
+	/** Make values observable (plain objects, arrays, Maps, Sets), like MobX's deep observables. Default `true`. */
 	deep?: boolean;
 }
 
@@ -68,9 +79,14 @@ export class ProxyLike<T extends object> {
 	/** Per-key equality (`observable.struct`); `Object.is` otherwise. */
 	private equalsByKey: Map<keyof T, Equals> | undefined;
 	private readonly deep: boolean;
+	/** Tracks the set of keys (`keys()`), created on first tracked use. */
+	private keysDep: Dep | undefined;
+	/** Per-key {@link Owner}s of the observable values held. */
+	private keyOwners: Map<keyof T, Owner> | undefined;
 
 	constructor(target: T, options?: ProxyLikeOptions<T>) {
 		this.target = target;
+		observableValues.add(this);
 		this.deep = options?.deep ?? true;
 		if (this.deep) {
 			const record = target as Record<keyof T, unknown>;
@@ -78,7 +94,9 @@ export class ProxyLike<T extends object> {
 				// Data properties only: reading a getter here would run it with the wrong `this`.
 				const value = Object.getOwnPropertyDescriptor(target, key)?.value;
 				if (typeof value === "object" && value !== null) {
-					record[key] = enhance(value);
+					const enhanced = enhance(value);
+					record[key] = enhanced;
+					adopt(enhanced, this.ownerFor(key));
 				}
 			}
 		}
@@ -89,7 +107,8 @@ export class ProxyLike<T extends object> {
 				const fn = record[key];
 				if (typeof fn !== "function") continue;
 				record[key] = function (this: unknown, ...args: unknown[]) {
-					return batch(() => fn.apply(this, args));
+					// Like a MobX auto-action: batched and allowed to change state, still tracked.
+					return runAction(() => fn.apply(this, args), false);
 				};
 			}
 		}
@@ -106,15 +125,63 @@ export class ProxyLike<T extends object> {
 		globalState.tracking!.deps.add(dep);
 	}
 
+	/** The {@link Owner} for values held under `key`: notifies `key`'s readers. */
+	private ownerFor(key: keyof T): Owner {
+		this.keyOwners ??= new Map();
+		let owner = this.keyOwners.get(key);
+		if (!owner) {
+			owner = {
+				ownerChanged: () => {
+					const dep = this.deps?.get(key);
+					if (dep) reportChanged(dep);
+				},
+				ownerObserved: () => (this.deps?.get(key)?.observers.size ?? 0) > 0,
+			};
+			this.keyOwners.set(key, owner);
+		}
+		return owner;
+	}
+
+	/** Track the set of keys (for `keys()` / `has()` on keys added later). */
+	private observeKeys(): void {
+		this.keysDep ??= new Dep();
+		globalState.tracking?.deps.add(this.keysDep);
+	}
+
+	/**
+	 * The keys of the data properties (not getters or functions). Tracked: adding or deleting a key
+	 * re-runs what read them.
+	 */
+	keys(): Array<keyof T & string> {
+		if (globalState.tracking !== null) this.observeKeys();
+		const target = this.target as Record<string, unknown>;
+		return Object.keys(target).filter(
+			(key) =>
+				!this.getters?.has(key as keyof T) && typeof target[key] !== "function",
+		) as Array<keyof T & string>;
+	}
+
+	/** Whether `key` is a property. Tracked, including for keys that don't exist yet. */
+	has(key: keyof T): boolean {
+		if (globalState.tracking !== null) this.observe(key);
+		return Object.hasOwn(this.target, key);
+	}
+
 	/** @internal Use `equals` instead of `Object.is` to decide whether `key` changed. */
 	setEquals(key: keyof T, equals: Equals): void {
 		this.equalsByKey ??= new Map();
 		this.equalsByKey.set(key, equals);
 	}
 
+	/** @internal The wrapped object (for `toJS`). */
+	unwrap(): T {
+		return this.target;
+	}
+
 	/** @internal Set an initial value without notifying anyone. */
 	init(key: keyof T, value: T[keyof T]): void {
 		this.target[key] = value;
+		adopt(value, this.ownerFor(key));
 	}
 
 	/**
@@ -194,8 +261,18 @@ export class ProxyLike<T extends object> {
 		if (this.deep && typeof value === "object" && value !== null) {
 			value = enhance(value);
 		}
+		const isNewKey =
+			this.keysDep !== undefined && !Object.hasOwn(this.target, key);
 		const previous = this.target[key];
 		this.target[key] = value;
+		if (previous !== value) {
+			if (typeof previous === "object" && previous !== null) {
+				release(previous, this.ownerFor(key));
+			}
+			if (typeof value === "object" && value !== null) {
+				adopt(value, this.ownerFor(key));
+			}
+		}
 
 		this.scopedObservers.get(key)?.forEach((observer) => {
 			observer(key, previous, value);
@@ -205,10 +282,12 @@ export class ProxyLike<T extends object> {
 		});
 
 		const dep = this.deps?.get(key);
-		if (dep) {
-			const equals = this.equalsByKey?.get(key) ?? Object.is;
-			if (!equals(previous, value)) reportChanged(dep);
+		const equals = this.equalsByKey?.get(key) ?? Object.is;
+		if (!equals(previous, value)) {
+			checkWrite(dep, String(key));
+			if (dep) reportChanged(dep);
 		}
+		if (isNewKey) reportChanged(this.keysDep as Dep);
 		return value;
 	}
 
@@ -231,6 +310,8 @@ export class ProxyLike<T extends object> {
 	delete<K extends keyof T>(key: K): boolean {
 		if (!Object.hasOwn(this.target, key)) return true;
 		this.set(key, undefined as T[K]);
-		return delete this.target[key];
+		const deleted = delete this.target[key];
+		if (this.keysDep) reportChanged(this.keysDep);
+		return deleted;
 	}
 }

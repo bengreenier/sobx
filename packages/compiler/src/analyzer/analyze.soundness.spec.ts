@@ -101,7 +101,7 @@ describe("nested reads", () => {
 	it("does not treat read-only array methods as mutations", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const s = observable({ items: [] });
+			const s = observable({ items: [] }, { items: observable.ref });
 			s.items.map(f);
 			s.items.filter(f).length;
 			s.items.reduce(f, 0);
@@ -298,15 +298,26 @@ describe("indirect dependencies", () => {
 });
 
 describe("collections", () => {
-	it("reports observable arrays", () => {
+	it("records observable arrays as opaque observables", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const a = observable([1, 2]);
+			const a = observable([1, 2], null, { deep: false });
+			const b = observable.array();
 			const ok = observable({ list: [] });
 			const unknown = observable(value);
 		`);
-		expect(mod.diagnostics.map((d) => [d.code, d.related])).toEqual([
-			["observable-collection", ["observable:0"]],
+		expect(mod.observables.map((o) => o.shape.kind)).toEqual([
+			"array",
+			"array",
+			"object",
+			"unknown",
 		]);
+		expect(mod.diagnostics.map((d) => [d.code, d.related])).toEqual([
+			["opaque-observable", ["observable:0"]],
+			["opaque-observable", ["observable:1"]],
+		]);
+		expect(mod.observables[0]?.options).toMatchObject({
+			entries: { deep: { value: false } },
+		});
 	});
 });

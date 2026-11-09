@@ -340,10 +340,13 @@ describe("analyze: accesses", () => {
 		expect(mod.accesses).toEqual([]);
 	});
 
-	it("reports mutation through nested values", () => {
+	it("reports mutation through the values of ref / struct properties", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const s = observable({ obj: {}, list: [], name: "" });
+			const s = observable(
+				{ obj: {}, list: [], name: "" },
+				{ obj: observable.ref, list: observable.struct },
+			);
 			s.obj.x = 1;
 			s.list[0] = 2;
 			delete s.obj.k;
@@ -354,14 +357,26 @@ describe("analyze: accesses", () => {
 		`);
 		expect(mod.diagnostics.map((d) => [d.code, d.span.loc.start.line])).toEqual(
 			[
-				["deep-mutation", 4],
-				["deep-mutation", 5],
-				["deep-mutation", 6],
 				["deep-mutation", 7],
 				["deep-mutation", 8],
+				["deep-mutation", 9],
+				["deep-mutation", 10],
+				["deep-mutation", 11],
 			],
 		);
+		expect(mod.diagnostics[0]?.message).toContain("observable.ref");
 		expect(mod.accesses.every((a) => a.kind === "Read")).toBe(true);
+	});
+
+	it("does not report mutation through deep (default) properties", () => {
+		const mod = analyze(`
+			import { observable } from "@sobx/magic";
+			const s = observable({ obj: {}, list: [] });
+			s.obj.x = 1;
+			s.list.push(1);
+			s.list[0] = 2;
+		`);
+		expect(mod.diagnostics).toEqual([]);
 	});
 
 	it("reports dynamic keys, as errors only when tracked", () => {

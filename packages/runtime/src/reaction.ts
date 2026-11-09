@@ -1,16 +1,16 @@
 import {
-	batch,
 	computedsChanged,
 	type Derivation,
 	type Equals,
 	emptyTracking,
 	endBatch,
+	globalState,
 	rebind,
+	runAction,
 	schedule,
 	startBatch,
 	type Tracking,
 	track,
-	untracked,
 } from "./core.js";
 
 // The runtime targets any JS environment; only `console.error` is needed.
@@ -51,11 +51,14 @@ export class Reaction implements Derivation {
 	/** @internal Run once (initially, or when scheduled). Errors are reported, not thrown. */
 	execute(): void {
 		startBatch();
+		// Reactions may change state (as in MobX), without enforceActions warnings.
+		globalState.allowStateChanges++;
 		try {
 			this.run(this);
 		} catch (error) {
 			console.error("[sobx] uncaught error in reaction:", error);
 		} finally {
+			globalState.allowStateChanges--;
 			endBatch();
 		}
 	}
@@ -145,5 +148,5 @@ export function autorun(
 
 /** Untracked and batched, like a MobX action. */
 export function runAsAction<T>(fn: () => T): T {
-	return batch(() => untracked(fn));
+	return runAction(fn);
 }

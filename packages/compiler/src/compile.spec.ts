@@ -1,13 +1,14 @@
 import generate from "@babel/generator";
 import { parse } from "@babel/parser";
 import * as runtime from "@sobx/runtime";
+import * as mobx from "mobx";
 import { resolveOptions, transform } from "unplugin-ast";
 import type { CompileDiagnostic } from "./diagnostics.js";
 import { analyze } from "./native.js";
 import { type TransformSobxOptions, transformSobx } from "./transform.js";
 import { PARSER_PLUGINS, SobxTransformer } from "./transformers/sobx.js";
 
-const HEADER = `import { observable, computed, reaction, autorun, action, runInAction, makeObservable, makeAutoObservable, when, flow, comparer } from "@sobx/magic";\n`;
+const HEADER = `import { observable, computed, reaction, autorun, action, runInAction, makeObservable, makeAutoObservable, when, flow, comparer, toJS, configure, isObservableArray } from "@sobx/magic";\n`;
 
 function compileFull(
 	body: string,
@@ -38,6 +39,30 @@ function run(body: string): unknown[] {
 	const logs: unknown[] = [];
 	new Function("runtime", "log", script)(runtime, (v: unknown) => logs.push(v));
 	return logs;
+}
+
+/** Run `body` as is against MobX (default mode, with its proxies); returns what it logged. */
+function runMobx(body: string): unknown[] {
+	const names = (HEADER.match(/\{([^}]*)\}/) as RegExpMatchArray)[1];
+	const logs: unknown[] = [];
+	new Function("mobx", "log", `const {${names}} = mobx;\n${body}`)(
+		mobx,
+		(v: unknown) => logs.push(v),
+	);
+	return logs;
+}
+
+/** Plain, comparable copies of logged values. */
+const plain = (logs: unknown[]) => JSON.parse(JSON.stringify(logs));
+
+/**
+ * The same source run against MobX (as is) and compiled with sobx (no Proxy): they must log the
+ * same values.
+ */
+function parity(name: string, body: string) {
+	it(name, () => {
+		expect(plain(run(body))).toEqual(plain(runMobx(body)));
+	});
 }
 
 /** Run the bundler-plugin path (unplugin-ast + SobxTransformer) on a file. */
@@ -236,6 +261,257 @@ both(5);`),
 	});
 });
 
+describe("compiled code: arrays and deep observables", () => {
+	beforeAll(() => runtime.configure({ enforceActions: "never" }));
+	afterAll(() => runtime.configure({ enforceActions: "observed" }));
+
+	it("observable arrays", () => {
+		expect(
+			run(`const todos = observable([]);
+autorun(() => log(todos.map((t) => t.title).join(",")));
+todos.push({ title: "a" });
+todos[0].title = "b";
+todos.splice(0, 1, { title: "c" }, { title: "d" });
+todos.length = 1;`),
+		).toEqual(["", "a", "b", "c,d", "c"]);
+	});
+
+	it("nested objects and arrays inside fast-path objects", () => {
+		const body = `const store = observable({ user: { name: "a" }, items: [] });
+autorun(() => log(store.user.name + ":" + store.items.length));
+store.user.name = "b";
+store.items.push(1);
+store.user = { name: "c" };
+store.user.name = "d";`;
+		expect(compileFull(body).code).toContain("new ProxyLike(");
+		expect(run(body)).toEqual(["a:0", "b:0", "b:1", "c:1", "d:1"]);
+	});
+
+	it("runtime objects: added keys, delete, in, Object.keys / values / entries (no Proxy)", () => {
+		const body = `const store = observable({ a: 1 });
+log(store); // escapes: made observable at runtime
+autorun(() => log([Object.keys(store).join(","), "b" in store, store.b ?? null, Object.values(store).join(",")]));
+store.b = 2;
+delete store.a;
+store.c = 3;
+log(Object.entries(store));`;
+		const { code } = compileFull(body);
+		expect(code).not.toContain("ProxyLike");
+		expect(code).toContain("__sobx_keysOf(store)");
+		expect(code).toContain('__sobx_hasProperty(store, "b")');
+		expect(code).toContain('__sobx_getProperty(store, "b")');
+		expect(code).toContain('__sobx_setProperty(store, "b", 2)');
+		expect(code).toContain('__sobx_deleteProperty(store, "a")');
+		expect(run(body).slice(1)).toEqual([
+			["a", false, null, "1"],
+			["a,b", true, 2, "1,2"],
+			["b", true, 2, "2"],
+			["b,c", true, 2, "2,3"],
+			[
+				["b", 2],
+				["c", 3],
+			],
+		]);
+	});
+
+	it("runtime objects: dynamic keys", () => {
+		expect(
+			run(`const store = observable({});
+const key = "x";
+autorun(() => log(store[key] ?? null));
+store[key] = 1;
+store[key] += 1;
+store[key]++;
+delete store[key];`),
+		).toEqual([null, 1, 2, 3, null]);
+	});
+
+	it("observable arrays: index and length writes are compiled", () => {
+		const body = `const a = observable([1, 2, 3]);
+autorun(() => log(a[0] + ":" + a.length));
+a[0] = 10;
+a.length = 2;
+a[0]++;
+a[1] += 5;
+delete a[1];
+log(a.slice());`;
+		const { code } = compileFull(body);
+		expect(code).toContain("__sobx_setProperty(a, 0, 10)");
+		expect(code).toContain('__sobx_setProperty(a, "length", 2)');
+		expect(code).toContain('__sobx_getProperty(a, "length")');
+		expect(run(body)).toEqual([
+			"1:3",
+			"10:3",
+			"10:2",
+			"11:2",
+			"11:2", // a[1] += 5 changes the array, not a[0] / length; reads are whole-array
+			"11:2",
+			[11, undefined],
+		]);
+	});
+
+	it("writes through nested values are compiled (fast path, runtime objects, classes)", () => {
+		expect(
+			run(`const store = observable({ items: [1], user: { name: "a" } });
+autorun(() => log([store.items[0], store.items.length, store.user.nickname ?? null].join()));
+store.items[0] = 5;
+store.items.length = 0;
+store.user.nickname = "b";
+delete store.user.nickname;
+class Todos {
+  list = [{ done: false }];
+  constructor() { makeAutoObservable(this); }
+  finish(i) { this.list[i].done = true; }
+  reset() { this.list.length = 0; }
+}
+const todos = new Todos();
+autorun(() => log("open " + todos.list.filter((t) => !t.done).length + "/" + todos.list.length));
+todos.finish(0);
+todos.reset();`),
+		).toEqual([
+			"1,1,",
+			"5,1,",
+			",0,",
+			",0,b",
+			",0,",
+			"open 1/1",
+			"open 0/1",
+			"open 0/0",
+		]);
+	});
+
+	it("reports what it can't compile", () => {
+		expect(
+			codes(
+				`const s = observable({ a: 1 }); log(s); Object.assign(s, { b: 1 });`,
+			),
+		).toContainEqual(["unsupported-operation", "error"]);
+		expect(
+			codes(`const s = observable({ items: [1] }); s.items[next()] += 1;`),
+		).toContainEqual(["uncompiled-write", "error"]);
+		// Rewritten operations are not reported.
+		expect(
+			codes(
+				`const s = observable({ a: 1 }); log(s); log("a" in s, Object.keys(s), s[k]);`,
+			).filter(([, severity]) => severity !== "info"),
+		).toEqual([]);
+	});
+
+	it("classes with array fields", () => {
+		expect(
+			run(`class Todos {
+  items = [];
+  constructor() { makeAutoObservable(this); }
+  get open() { return this.items.filter((t) => !t.done).length; }
+  add(title) { this.items.push({ title, done: false }); }
+  finish(i) { this.items[i].done = true; }
+}
+const todos = new Todos();
+autorun(() => log(todos.open));
+todos.add("a"); todos.add("b"); todos.finish(0);
+log(isObservableArray(todos.items));`),
+		).toEqual([0, 1, 2, 1, true]);
+	});
+
+	it("toJS", () => {
+		expect(
+			run(`const store = observable({ items: [{ n: 1 }], get count() { return this.items.length; } });
+log(JSON.stringify(toJS(store)));
+log(isObservableArray(toJS(store).items));`),
+		).toEqual(['{"items":[{"n":1}]}', false]);
+	});
+
+	it("configure is redirected to the runtime", () => {
+		expect(run(`configure({ enforceActions: "never" }); log("ok");`)).toEqual([
+			"ok",
+		]);
+	});
+});
+
+describe("parity with MobX (compiled sobx vs MobX's default, Proxy-based mode)", () => {
+	beforeAll(() => {
+		runtime.configure({ enforceActions: "never" });
+		mobx.configure({ enforceActions: "never" });
+	});
+	afterAll(() => {
+		runtime.configure({ enforceActions: "observed" });
+		mobx.configure({ enforceActions: "observed" });
+	});
+
+	parity(
+		"adding and deleting keys, in, Object.keys / values / entries",
+		`const s = observable({ a: 1 });
+log(s === s);
+autorun(() => log([Object.keys(s), "b" in s, s.b ?? null, Object.values(s), Object.entries(s)]));
+s.b = 2;
+s.c = 3;
+delete s.a;
+delete s.b;
+log({ ...s });`,
+	);
+
+	parity(
+		"dynamic keys",
+		`const s = observable({});
+const k = "x";
+autorun(() => log([s[k] ?? null, Object.keys(s)]));
+s[k] = 1;
+s[k] += 2;
+s[k]--;
+delete s[k];`,
+	);
+
+	parity(
+		"array index and length writes",
+		`const a = observable([1, 2, 3]);
+autorun(() => log([a[0], a[2] ?? null, a.length]));
+a[0] = 10;
+a[3] = 4;
+a.length = 2;
+a[0]++;
+a[1] *= 3;
+log(a.slice());`,
+	);
+
+	parity(
+		"writes through nested values",
+		`const store = observable({ items: [1, 2], user: { name: "a" }, grid: [[1]] });
+autorun(() => log([store.items[1], store.items.length, store.user.nickname ?? null, Object.keys(store.user), store.grid[0][1] ?? null]));
+store.items[1] = 5;
+store.items.length = 1;
+store.user.nickname = "b";
+delete store.user.name;
+store.grid[0][1] = 2;
+store.items.push(7);`,
+	);
+
+	parity(
+		"local fast-path objects with nested arrays",
+		`const store = observable({ todos: [] });
+autorun(() => log(store.todos.map((t) => t.title + (t.done ? "!" : "")).join()));
+store.todos.push({ title: "a", done: false });
+store.todos[0].done = true;
+store.todos[1] = { title: "b", done: false };
+store.todos.length = 1;`,
+	);
+
+	parity(
+		"classes with array and object fields",
+		`class Store {
+  items = [];
+  meta = {};
+  constructor() { makeAutoObservable(this); }
+  add(x) { this.items[this.items.length] = x; }
+  tag(k, v) { this.meta[k] = v; }
+}
+const s = new Store();
+autorun(() => log([s.items.length, Object.keys(s.meta)]));
+s.add(1);
+s.add(2);
+s.tag("x", 1);`,
+	);
+});
+
 describe("compiled code: when, flow, collections, comparer", () => {
 	it("when runs its effect once", () => {
 		expect(
@@ -302,11 +578,8 @@ s.p = { x: 2 };`),
 
 describe("diagnostics", () => {
 	it("reports what the runtime can't do as errors", () => {
-		expect(
-			codes(`const s = observable({ user: { name: "" } }); s.user.name = "x";`),
-		).toContainEqual(["deep-mutation", "error"]);
-		expect(codes(`const a = observable([1]);`)).toContainEqual([
-			"observable-collection",
+		expect(codes(`const o = observable.object({});`)).toContainEqual([
+			"unsupported-api",
 			"error",
 		]);
 		expect(
@@ -316,6 +589,28 @@ describe("diagnostics", () => {
 		).toContainEqual(["unsupported-option", "error"]);
 	});
 
+	it("reports unknown imports as errors", () => {
+		const source = `import { extendObservable } from "@sobx/magic";`;
+		const ast = parse(source, { sourceType: "module" });
+		expect(
+			transformSobx(ast.program, source).diagnostics.map((d) => [
+				d.code,
+				d.severity,
+			]),
+		).toEqual([["unknown-import", "error"]]);
+	});
+
+	it("reports mutation of ref values as warnings", () => {
+		expect(
+			codes(
+				`const s = observable({ list: [] }, { list: observable.ref }); s.list.push(1);`,
+			),
+		).toContainEqual(["deep-mutation", "warning"]);
+		expect(
+			codes(`const s = observable({ user: { name: "" } }); s.user.name = "x";`),
+		).toEqual([]);
+	});
+
 	it("reports likely mistakes as warnings", () => {
 		expect(
 			codes(`const s = observable({ a: 1 }); autorun(() => { s.a = 2; });`),
@@ -323,11 +618,18 @@ describe("diagnostics", () => {
 	});
 
 	it("can be re-graded per code", () => {
-		const { diagnostics } = compileFull(
-			`const s = observable({ items: [] }); s.items.push(1);`,
-			{ diagnostics: { "deep-mutation": "off" } },
-		);
-		expect(diagnostics.map((d) => d.code)).not.toContain("deep-mutation");
+		const body = `const s = observable({ a: 1 }); autorun(() => { s.a = 2; });`;
+		const off = compileFull(body, {
+			diagnostics: { "write-in-derivation": "off" },
+		}).diagnostics;
+		expect(off.map((d) => d.code)).not.toContain("write-in-derivation");
+		const error = compileFull(body, {
+			diagnostics: { "write-in-derivation": "error" },
+		}).diagnostics;
+		expect(error.map((d) => [d.code, d.severity])).toContainEqual([
+			"write-in-derivation",
+			"error",
+		]);
 	});
 });
 
@@ -369,8 +671,8 @@ class Store {
 	it("fails on errors and logs warnings", async () => {
 		await expect(
 			compileWithPlugin(`import { observable } from "@sobx/magic";
-const a = observable([1]);`),
-		).rejects.toThrow(/observable-collection/);
+const o = observable.object({});`),
+		).rejects.toThrow(/unsupported-api/);
 		const warnings: string[] = [];
 		await compileWithPlugin(
 			`import { observable, autorun } from "@sobx/magic";
