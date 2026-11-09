@@ -393,11 +393,14 @@ function createObservableObject<T extends object>(
 	// Accessors only: sobx never uses `Proxy` (the `proxy` option is accepted and ignored).
 	const result = Object.create(Object.getPrototypeOf(value)) as T;
 	for (const key of Reflect.ownKeys(value)) {
-		Object.defineProperty(
-			result,
+		const descriptor = Object.getOwnPropertyDescriptor(
+			value,
 			key,
-			Object.getOwnPropertyDescriptor(value, key) as PropertyDescriptor,
-		);
+		) as PropertyDescriptor;
+		// The copy is ours to make observable, even if the source is frozen (e.g. React props).
+		descriptor.configurable = true;
+		if ("value" in descriptor) descriptor.writable = true;
+		Object.defineProperty(result, key, descriptor);
 	}
 	// Registered before its values are converted, so cyclic / shared values convert once.
 	administration(result);

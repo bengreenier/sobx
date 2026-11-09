@@ -50,6 +50,27 @@ code imports it.
 | Legacy (`experimentalDecorators`) decorators, `@observable x` without `accessor` | No | Error (`invalid-annotation`). |
 | `extendObservable`, `observe`, `intercept`, `spy`, `trace`, `reaction` options like `delay` / `scheduler` / `onError`, ... | No | Error (`unknown-import` / `unsupported-api` / `unsupported-option`). |
 
+## React
+
+[`@sobx/react`](../packages/react) has the same API as `mobx-react` (and `mobx-react-lite`):
+switch `"mobx-react"` / `"mobx-react-lite"` imports to `"@sobx/react"`.
+
+| API | Supported | Notes |
+|---|---|---|
+| `observer(component)` | Yes | Function, `forwardRef` and class components; standard class decorator. Function components are memoized. |
+| `<Observer>` | Yes | `children` or `render` function. |
+| `useLocalObservable(initializer, annotations?)` | Yes | A runtime (accessor-based) observable: add or delete keys with `set` / `remove`. |
+| `Provider`, `inject`, `MobXProviderContext` | Yes | |
+| `enableStaticRendering`, `isUsingStaticRendering` | Yes | For server-side rendering. |
+| `useObserver`, `useLocalStore`, `useAsObservableSource`, `useStaticRendering`, `observerBatching`, `isObserverBatched` | Yes | Deprecated, as in mobx-react. |
+| `disposeOnUnmount`, `PropTypes` | No | Deprecated / removed in recent mobx-react and React. |
+
+Components in `.tsx` / `.jsx` files written against `@sobx/magic` are compiled like any other
+code. Observables a component receives as props or through context are like any observable
+passed to a function: their declared properties are tracked, other property operations use the
+explicit API. Renders that React discards without mounting release their subscriptions (through
+`FinalizationRegistry`), as in mobx-react.
+
 ## Values
 
 Observables are **deep** by default, as in MobX: plain objects, arrays, Maps and Sets put into an
@@ -138,4 +159,6 @@ nested writes). Both check that the logged values match. Known differences:
   `observableRequiresReaction`, ...) are not implemented.
 - Not implemented: `extendObservable`, `observe` / `intercept`, `spy` / `trace`, `onBecomeObserved`,
   reaction schedulers / `delay`, legacy decorators.
-- No React bindings yet (MobX's `mobx-react` works with MobX observables only).
+- React: [`@sobx/react`](../packages/react) has mobx-react's API, except `disposeOnUnmount`,
+  `PropTypes` and mobx-react's development check of class components' `this.props` /
+  `this.state` read from other derivations.

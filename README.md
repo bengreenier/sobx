@@ -10,6 +10,7 @@ Packages in this repo:
 |---------|-------------|
 | [**@sobx/magic**](./packages/magic) | Virtual MobX-compatible API (compile-time; use with the compiler) |
 | [**@sobx/runtime**](./packages/runtime) | MobX-compatible runtime (tracking, computeds, reactions, actions) and `ProxyLike`, which compiled code imports |
+| [**@sobx/react**](./packages/react) | React bindings (`observer`, `Observer`, `useLocalObservable`, `Provider` / `inject`), mobx-react's API on `@sobx/runtime` |
 | [**@sobx/compiler**](./packages/compiler) | Compiler and bundler plugins (Vite, Rollup, Webpack, esbuild, Rolldown, Rspack) |
 | `@sobx/compiler-<platform>` | Native analyzer `@sobx/compiler` runs on (source in [crates/sobx_compiler](./crates/sobx_compiler); prebuilt binaries not published yet) |
 | [**@sobx/ast**](./packages/ast) | Types of the IR of a program's MobX-style usages |
@@ -30,6 +31,8 @@ You write MobX-style code against `@sobx/magic`. At build time, `@sobx/compiler`
 - reports anything that wouldn't behave like MobX as a build error;
 - redirects the imports to `@sobx/runtime`, a small MobX-compatible runtime that implements the API;
 - compiles local observable objects to a `ProxyLike` with explicit `get` / `set` calls (the fast path).
+
+For React, `@sobx/react` provides mobx-react's API (`observer` and friends) on top of `@sobx/runtime`.
 
 The analyzer's tests (specs and an invariant fuzz) live in `packages/compiler/src/analyzer`.
 

@@ -10,7 +10,7 @@ Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to you
 
 sobx never uses `Proxy`. The compiler turns the operations MobX observes through proxies (adding / deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` writes) into explicit runtime calls where it can see the observable; elsewhere (a function receiving an observable, an alias), use the explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
 
-A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers), and there are no React bindings yet. The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
+A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
 ## Install
 

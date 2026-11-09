@@ -196,6 +196,20 @@ describe("observable objects", () => {
 		expect(structuredClone(toJS(o))).toEqual({ a: 1 });
 	});
 
+	it("can be made from frozen objects (as MobX)", () => {
+		const source = Object.freeze({ a: 1, nested: Object.freeze({ b: 2 }) });
+		const o = observable(source);
+		expect(o).not.toBe(source);
+		expect(track(() => [o.a, o.nested.b])).toEqual(["[1,2]"]);
+		const seen = track(() => o.nested.b);
+		runInAction(() => {
+			o.a = 3;
+			o.nested.b = 4;
+		});
+		expect(seen).toEqual(["2", "4"]);
+		expect(source).toEqual({ a: 1, nested: { b: 2 } });
+	});
+
 	it("track added and deleted keys through the explicit API", () => {
 		const o = observable<Record<string, number>>({ a: 1 });
 		const keys = track(() => keysOf(o));
