@@ -66,8 +66,8 @@ switch `"mobx-react"` / `"mobx-react-lite"` imports to `"@sobx/react"`.
 | `disposeOnUnmount`, `PropTypes` | No | Deprecated / removed in recent mobx-react and React. |
 
 Components in `.tsx` / `.jsx` files written against `@sobx/magic` are compiled like any other
-code. Observables a component receives as props or through context are like any observable
-passed to a function: their declared properties are tracked, other property operations use the
+code. Observables a component imports from another module or receives as props or through context
+are like any observable passed to a function: their declared properties are tracked, other property operations use the
 explicit API. Renders that React discards without mounting release their subscriptions (through
 `FinalizationRegistry`), as in mobx-react.
 
