@@ -7,10 +7,15 @@ supported API is implemented by [`@sobx/runtime`](../packages/runtime), a MobX-s
 form.
 
 **sobx never uses `Proxy`.** Operations that MobX observes through its proxies (adding or
-deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` writes) are compiled
-into explicit runtime calls where the compiler can see them, and are otherwise done with the
-explicit API: `set`, `remove`, `has`, `get`, `keys`, `values`, `entries` (same names and semantics
-as MobX's object API functions).
+deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` reads and writes) are
+compiled into runtime calls: precisely on the observables the compiler sees created, and on any
+value whose origin it can't trace (a parameter such as React props, an import, a call result such
+as `useContext()`), which may be an observable. Those runtime calls behave as plain JavaScript on
+other values. The one thing the compiler can't do without a `Proxy` is see a dot-syntax read of a
+key that doesn't exist yet (`props.store.later`) on a value it can't trace; see
+[Differences from MobX](#differences-from-mobx). sobx also has an explicit API: `set`, `remove`,
+`has`, `get`, `keys`, `values`, `entries` (same names and semantics as MobX's object API
+functions), for modules the compiler doesn't process.
 
 Each pattern below has one of these outcomes:
 
@@ -59,17 +64,18 @@ switch `"mobx-react"` / `"mobx-react-lite"` imports to `"@sobx/react"`.
 |---|---|---|
 | `observer(component)` | Yes | Function, `forwardRef` and class components; standard class decorator. Function components are memoized. |
 | `<Observer>` | Yes | `children` or `render` function. |
-| `useLocalObservable(initializer, annotations?)` | Yes | A runtime (accessor-based) observable: add or delete keys with `set` / `remove`. |
+| `useLocalObservable(initializer, annotations?)` | Yes | A runtime (accessor-based) observable, analyzed from the object literal the initializer returns: adding / deleting keys, dynamic keys, `in` and `Object.keys` on it are compiled to runtime calls. |
 | `Provider`, `inject`, `MobXProviderContext` | Yes | |
 | `enableStaticRendering`, `isUsingStaticRendering` | Yes | For server-side rendering. |
 | `useObserver`, `useLocalStore`, `useAsObservableSource`, `useStaticRendering`, `observerBatching`, `isObserverBatched` | Yes | Deprecated, as in mobx-react. |
 | `disposeOnUnmount`, `PropTypes` | Yes | `disposeOnUnmount` is deprecated, as in mobx-react. |
 
-Components in `.tsx` / `.jsx` files written against `@sobx/magic` are compiled like any other
-code. Observables a component imports from another module or receives as props or through context
-are like any observable passed to a function: their declared properties are tracked, other property operations use the
-explicit API. Renders that React discards without mounting release their subscriptions (through
-`FinalizationRegistry`), as in mobx-react.
+Modules that import `@sobx/magic` or `@sobx/react` are compiled, `.tsx` / `.jsx` included.
+Observables a component receives as props, through context, from a hook or from another module
+are values the compiler can't trace: their property operations are compiled to runtime calls
+(see [Values whose origin can't be traced](#values-whose-origin-cant-be-traced)), so they behave
+as with MobX. Renders that React discards without mounting release their subscriptions (through
+`FinalizationRegistry`), as in mobx-react. Tested against React 18 and 19.
 
 ## Values
 
@@ -80,10 +86,10 @@ themselves, recursively, when they are stored.
 | Pattern | Outcome |
 |---|---|
 | Nested objects and arrays (`store.user.name = "x"`, `store.items.push(x)`, `store.items[0] = x`) | Tracked. Writes through a nested value are compiled to runtime calls. |
-| Adding / deleting keys (`store.newKey = 1`, `delete store.k`), dynamic keys (`store[k]`), `"k" in store`, `Object.keys` / `values` / `entries(store)` | Compiled to runtime calls (`setProperty`, `deleteProperty`, `getProperty`, `hasProperty`, `keysOf`, ...) where the compiler can see the observable; otherwise use `set` / `remove` / `get` / `has` / `keys`. `Object.assign(store, ...)` and similar are build errors. |
+| Adding / deleting keys (`store.newKey = 1`, `delete store.k`), dynamic keys (`store[k]`), `"k" in store`, `Object.keys` / `values` / `entries(store)` | Compiled to runtime calls (`setProperty`, `deleteProperty`, `getProperty`, `hasProperty`, `keysOf`, ...). `Object.assign(store, ...)` and similar on an observable the compiler sees are build errors. |
 | Arrays: methods, iteration, `Array.isArray`, `JSON.stringify`, `structuredClone` | Real arrays. Methods and iteration are tracked as a whole; a mutating method notifies once. |
-| Array `length` / `[i]` reads | Tracked when the array is reached through an observable property (`store.items.length`: the array notifies the property holding it) or when the compiler sees the array (`items[0]` on an `observable([...])` variable is compiled to `getProperty`). Otherwise use `array.get(i)` or a method. |
-| Array `[i] = v` / `length = n` writes | Compiled to `array.set(i, v)` / `array.setLength(n)` (through `setProperty`) where the compiler can follow the array. Otherwise use `set` / `setLength` / `splice`. |
+| Array `length` / `[i]` reads | Tracked: through the observable property holding the array (`store.items.length`: the array notifies the property), or compiled to `getProperty` (`items[0]` on an `observable([...])` variable, or on an array the compiler can't trace, such as a parameter). |
+| Array `[i] = v` / `length = n` writes | Compiled to `array.set(i, v)` / `array.setLength(n)` (through `setProperty`). |
 | `observable.ref` | Values are stored as they are (not converted). Mutating such a value is not tracked: warning `deep-mutation`. |
 | `observable.shallow` | Collections and objects become observable, their contents are not converted. |
 | `observable.struct` | Not converted; a new value that is structurally equal is not a change. |
@@ -113,12 +119,36 @@ For a local `const s = observable({...})`:
 Why an observable went to the runtime is reported as an info diagnostic (`runtime-observable`),
 returned by `transformSobx` and not printed by the bundler plugins.
 
+## Values whose origin can't be traced
+
+In a module the compiler processes (one that imports `@sobx/magic` or `@sobx/react`), a value may
+be an observable the compiler can't see created: a parameter (React props), an import from
+another module, a call result (`useContext(...)`, a hook, a getter function), a variable
+initialized from one of these or reassigned, `this` outside an observable class or object, and
+anything reached through them (`props.store.items`). On those, the operations only a `Proxy` would
+observe are compiled to runtime calls:
+
+| Pattern | Compiled to |
+|---|---|
+| `o[k]`, `o[0]`, `o.length` | `getProperty(o, k)`, inside reactions, computeds and observer renders (plain `o[k]` elsewhere: `__sobx_globalState.tracking !== null ? ... : ...`) |
+| `k in o`, `Object.keys` / `values` / `entries(o)` | `hasProperty`, `keysOf`, `valuesOf`, `entriesOf` (likewise only inside derivations) |
+| `o.k = v`, `o[k] = v`, `o.k += v`, `o[k]++`, `o.k ||= v`, `delete o[k]` | `setProperty`, `updateProperty`, `deleteProperty` when `o` is observable (checked inline: `o[$sobx] !== void 0 ? ... : <the original write>`) |
+
+The runtime calls behave exactly as the plain operations on values that aren't observables
+(checked by a differential fuzz test), and plain values skip them, so plain code in a compiled
+module runs at close to its uncompiled speed (`packages/bench`: 8% slower on a loop of nothing but
+such operations). Values known to be plain (literals, local objects and arrays, `new Map()`, ...),
+globals, and observables the compiler sees created are left alone or compiled precisely. Method
+calls (`o[k]()`), optional chains (`o?.[k]`), destructuring targets and compound writes whose
+object or key has side effects are left as they are (no error). Modules that import neither
+`@sobx/magic` nor `@sobx/react` aren't compiled: use the explicit API there.
+
 ## Reactivity
 
 | Pattern | Outcome |
 |---|---|
 | Reads in reactions, autoruns and computeds, including in functions they call and conditional reads | Tracked dynamically, like MobX. |
-| Observables shared across modules | Runtime: exported observables are accessor-based, so other modules' reads and writes of declared properties are tracked; the compiler rewrites the other operations in each module that imports `@sobx/magic`. |
+| Observables shared across modules | Runtime: exported observables are accessor-based, so other modules' reads and writes of declared properties are tracked; in a module that imports `@sobx/magic` or `@sobx/react`, the other property operations on an imported value are compiled like those on any value whose origin can't be traced. |
 | Changing observed observables outside actions | Warning at runtime in development builds, as in MobX (`configure({ enforceActions })`: `"observed"` by default, `"always"`, `"never"`). Reactions and effects may change state. |
 | Writes inside a reaction's data function, autorun or computed | Warning (`write-in-derivation`). |
 | Accesses after `await` in an action or tracked function | Warning (`after-await`): they run outside the action / tracking, as in MobX. |
@@ -135,13 +165,15 @@ proxies; the compiler's parity tests run the same source as is against MobX and 
 sobx (added / deleted keys, `in`, `Object.keys`, dynamic keys, array index / `length` writes,
 nested writes). Both check that the logged values match. Known differences:
 
-- No `Proxy`: an operation the compiler can't see is not observed by itself. That is: adding or
-  deleting keys, `in` / `Object.keys`, and array index / `length` writes in code that receives an
-  observable without the compiler knowing (a function parameter, an alias such as
-  `const t = store`, a module not compiled by sobx). Use the explicit API there (`set`, `remove`,
-  `has`, `keys`, `array.set(i, v)`, `array.setLength(n)`). Reading an array's `length` / `[i]`
-  from a variable captured outside a derivation isn't tracked either; use `array.get(i)` or
-  a method.
+- No `Proxy`. Two things follow:
+  - A dot-syntax read of a key that doesn't exist yet (`props.store.later`, where `later` is added
+    afterwards) is only tracked when the compiler sees the observable created (it then knows the
+    declared keys). Through a value it can't trace, such a read isn't tracked: read it with
+    `get(o, "later")`, or declare the key up front. Without a `Proxy`, a property that doesn't
+    exist can't be observed; this is inherent.
+  - Modules that import neither `@sobx/magic` nor `@sobx/react` aren't compiled, so the
+    operations above aren't observed there: use the explicit API (`set`, `remove`, `has`,
+    `keys`, `get`, `array.set(i, v)`, `array.setLength(n)`).
 
 - Cyclic plain data (`x.self = x`) converts to an observable with the same cycle; MobX
   overflows the stack.
@@ -153,6 +185,9 @@ nested writes). Both check that the logged values match. Known differences:
   with `computed()`, `observable()` (runtime), `makeObservable` / `makeAutoObservable` or
   `@computed` are cached.
 - `autoAction` members are batched but not untracked.
+- Adding or removing a key notifies whatever read the property holding the object
+  (`store.tags`), so a derivation that read `store.tags.a` re-runs when `store.tags.b` is added,
+  where MobX wouldn't. This can only cause an extra re-run.
 - An array mutation notifies every observable property that held the array since it was
   stored (owners are released when a property is overwritten; an element removed from an array
   with `copyWithin` / `fill` may keep notifying it, which can only cause an extra re-run).
@@ -162,3 +197,5 @@ nested writes). Both check that the logged values match. Known differences:
   reaction schedulers / `delay`, legacy decorators.
 - React: [`@sobx/react`](../packages/react) has mobx-react's API; `observerBatching` does
   nothing (React 18+ batches updates itself).
+- Plain object literals from another realm (an iframe, `node:vm`) are accepted by `observable()`,
+  as in MobX; Maps and Sets from another realm are stored as they are.

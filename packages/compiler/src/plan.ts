@@ -61,6 +61,11 @@ export interface CompilePlan {
 	operations: Set<string>;
 	/** Reads of an observable's property that continue into a nested value (`store.items[0]`), by member span. */
 	pathBases: Set<string>;
+	/**
+	 * Spans of operations on values whose origin can't be traced (they may be observables):
+	 * rewritten when that preserves their semantics, and otherwise left as they are, silently.
+	 */
+	untraced: Set<string>;
 	/** Spans the final rewrite handled (set by {@link finalizePlan}). */
 	rewritten: Set<string>;
 	/** Writes that would not be observed and couldn't be rewritten (set by {@link finalizePlan}). */
@@ -89,6 +94,7 @@ export function emptyPlan(moduleSpecifier: string): CompilePlan {
 		propertyDeletes: new Map(),
 		operations: new Set(),
 		pathBases: new Set(),
+		untraced: new Set(),
 		rewritten: new Set(),
 		uncompiled: [],
 	};
@@ -188,6 +194,7 @@ export function planFromModule(
 		}
 	}
 	planPropertyOperations(mod, plan);
+	planUntracedOperations(mod, plan);
 	return plan;
 }
 
@@ -260,6 +267,34 @@ function planPropertyOperations(mod: SobxModule, plan: CompilePlan): void {
 	}
 }
 
+/**
+ * Operations on values that may be observables the analyzer can't see (props, context, imports,
+ * parameters...): the same helpers, which behave as plain JavaScript on other values.
+ */
+function planUntracedOperations(mod: SobxModule, plan: CompilePlan): void {
+	for (const op of mod.untracedOperations) {
+		const span = spanKey(op.span);
+		const key: KeyRef =
+			op.key.kind === "static" ? { name: op.key.name } : { dynamic: true };
+		const target =
+			op.kind === "read"
+				? plan.propertyReads
+				: op.kind === "write"
+					? plan.propertyWrites
+					: op.kind === "delete"
+						? plan.propertyDeletes
+						: undefined;
+		if (target) {
+			if (target.has(span)) continue;
+			target.set(span, key);
+		} else {
+			if (plan.operations.has(span)) continue;
+			plan.operations.add(span);
+		}
+		plan.untraced.add(span);
+	}
+}
+
 function isIndexName(name: string): boolean {
 	return /^(0|[1-9]\d*)$/.test(name);
 }
@@ -301,6 +336,14 @@ export interface RewriteState {
 	failed: Map<ObservableId, string>;
 	/** Writes that would not be observed and couldn't be rewritten. */
 	uncompiled: Array<{ span: Span; message: string }>;
+	/**
+	 * How tracking reads (`getProperty`, `hasProperty`, `keysOf`...) are emitted: `normal`, as
+	 * `tracking ? <helpers> : <plain>`; `tracked`, as helpers (inside the first branch);
+	 * `plain`, as the original operations (inside the second).
+	 */
+	mode: "normal" | "tracked" | "plain";
+	/** A write being emitted as the original operation (the plain branch of {@link markedWrite}). */
+	plainWrite: t.Node | null;
 }
 
 export function newRewriteState(): RewriteState {
@@ -310,7 +353,89 @@ export function newRewriteState(): RewriteState {
 		consumed: new Set(),
 		failed: new Map(),
 		uncompiled: [],
+		mode: "normal",
+		plainWrite: null,
 	};
+}
+
+/**
+ * A write rewritten to a helper (`setProperty`, `updateProperty`, `deleteProperty`) only needs
+ * the helper when its object is observable: when the object can be evaluated twice, emit
+ * `o[$sobx] !== void 0 ? <helper> : <original write>` (the runtime marks observables with
+ * `$sobx`), so writes to plain values run as they are.
+ */
+function markedWrite(
+	node: t.Node,
+	member: t.MemberExpression,
+	helperWrite: t.Node,
+	plan: CompilePlan,
+	state: RewriteState,
+): t.Node {
+	if (!isPure(member.object)) return helperWrite;
+	state.helpers.add("$sobx");
+	// Rewritten from the original node (the plan matches source positions), then copied.
+	const object = t.cloneNode(
+		rewrite(member.object, plan, state) as t.Expression,
+	);
+	const test = t.binaryExpression(
+		"!==",
+		t.memberExpression(object, t.identifier(helperName("$sobx")), true),
+		t.unaryExpression("void", t.numericLiteral(0)),
+	);
+	const outer = state.plainWrite;
+	state.plainWrite = node;
+	try {
+		const plain = rewrite(node, plan, state) as t.Expression;
+		return t.conditionalExpression(test, helperWrite as t.Expression, plain);
+	} finally {
+		state.plainWrite = outer;
+	}
+}
+
+function withMode<T>(
+	state: RewriteState,
+	mode: RewriteState["mode"],
+	fn: () => T,
+): T {
+	const outer = state.mode;
+	state.mode = mode;
+	try {
+		return fn();
+	} finally {
+		state.mode = outer;
+	}
+}
+
+/**
+ * A read that only needs a helper to be tracked: `getProperty(o, k)` is `o[k]`, plus tracking.
+ * Tracking only matters while a derivation runs, so it's emitted as
+ * `__sobx_globalState.tracking !== null ? <helpers> : <original>` (each branch evaluates the
+ * operands once), and plain code outside reactions, computeds and observer renders runs at full
+ * speed. Nested tracking reads take the same branch.
+ */
+function trackingRead(
+	node: t.Node,
+	plan: CompilePlan,
+	state: RewriteState,
+	tracked: () => t.Expression,
+): t.Expression {
+	if (state.mode === "tracked") return tracked();
+	state.helpers.add("globalState");
+	const test = t.binaryExpression(
+		"!==",
+		t.memberExpression(
+			t.identifier(helperName("globalState")),
+			t.identifier("tracking"),
+		),
+		t.nullLiteral(),
+	);
+	const helpers = withMode(state, "tracked", tracked);
+	const plain = withMode(
+		state,
+		"plain",
+		() => rewrite(node, plan, state) as t.Expression,
+	);
+	return t.conditionalExpression(test, helpers, plain);
 }
 
 /** Local name of an injected runtime helper. */
@@ -409,6 +534,8 @@ function rewritePropertyWrite(
 	}
 	// target[key] op= v  ->  setProperty(target, key, getProperty(target, key) op v)
 	if (!isPure(member.object) || (member.computed && !isPure(member.property))) {
+		// Not known to be observable: leave it as it is.
+		if (plan.untraced.has(spanKey(member))) return undefined;
 		state.uncompiled.push({
 			span: irSpan(node),
 			message:
@@ -416,19 +543,27 @@ function rewritePropertyWrite(
 		});
 		return undefined;
 	}
+	// The object and key are evaluated twice (they're pure): copies of their rewritten forms
+	// (the plan matches source positions, which copies of the original nodes don't keep).
 	const previous = helper(state, "getProperty", [
-		r(t.cloneNode(member.object) as t.Expression),
-		memberKey(t.cloneNode(member), r) as t.Expression,
+		t.cloneNode(object),
+		t.cloneNode(key),
 	]);
 	const op = node.operator.slice(0, -1);
-	const next =
-		op === "&&" || op === "||" || op === "??"
-			? t.logicalExpression(op, previous, value)
-			: t.binaryExpression(
-					op as t.BinaryExpression["operator"],
-					previous,
-					value,
-				);
+	// Logical assignment only assigns when it has to:
+	// target[key] ||= v  ->  getProperty(target, key) || setProperty(target, key, v)
+	if (op === "&&" || op === "||" || op === "??") {
+		return t.logicalExpression(
+			op,
+			previous,
+			helper(state, "setProperty", [object, key, value]),
+		);
+	}
+	const next = t.binaryExpression(
+		op as t.BinaryExpression["operator"],
+		previous,
+		value,
+	);
 	return helper(state, "setProperty", [object, key, next]);
 }
 
@@ -533,9 +668,12 @@ export function rewriteMatch(
 				values: "valuesOf",
 				entries: "entriesOf",
 			}[callee.property.name];
-			if (name) {
+			if (name && state.mode !== "plain") {
 				consume(node);
-				return helper(state, name, [r(node.arguments[0])]);
+				const [target] = node.arguments;
+				return trackingRead(node, plan, state, () =>
+					helper(state, name, [r(target)]),
+				);
 			}
 		}
 
@@ -572,12 +710,18 @@ export function rewriteMatch(
 	if (
 		t.isMemberExpression(node) &&
 		t.isExpression(node.object) &&
-		plan.propertyReads.has(spanKey(node))
+		plan.propertyReads.has(spanKey(node)) &&
+		state.mode !== "plain" &&
+		!t.isPrivateName(node.property)
 	) {
-		const key = memberKey(node, r);
-		if (!key) return undefined;
 		consume(node);
-		return helper(state, "getProperty", [r(node.object), key]);
+		const object = node.object;
+		return trackingRead(node, plan, state, () =>
+			helper(state, "getProperty", [
+				r(object),
+				memberKey(node, r) as t.Expression,
+			]),
+		);
 	}
 
 	if (isMember(node) && t.isExpression(node.object)) {
@@ -596,10 +740,14 @@ export function rewriteMatch(
 		t.isBinaryExpression(node) &&
 		node.operator === "in" &&
 		plan.operations.has(spanKey(node)) &&
-		t.isExpression(node.left)
+		t.isExpression(node.left) &&
+		state.mode !== "plain"
 	) {
 		consume(node);
-		return helper(state, "hasProperty", [r(node.right), r(node.left)]);
+		const { left, right } = node;
+		return trackingRead(node, plan, state, () =>
+			helper(state, "hasProperty", [r(right), r(left as t.Expression)]),
+		);
 	}
 
 	// Writes the runtime can't observe by itself: undeclared / dynamic keys and array index /
@@ -612,6 +760,7 @@ export function rewriteMatch(
 			: undefined;
 	if (
 		t.isMemberExpression(writeTarget) &&
+		state.plainWrite !== node &&
 		!plan.writes.has(spanKey(writeTarget)) &&
 		!plan.deletes.has(spanKey(writeTarget))
 	) {
@@ -628,7 +777,7 @@ export function rewriteMatch(
 			);
 			if (out) {
 				consume(writeTarget);
-				return out;
+				return markedWrite(node, writeTarget, out, plan, state);
 			}
 		}
 	}
@@ -645,14 +794,19 @@ export function rewriteMatch(
 			// s.k op= v  ->  s.set("k", s.get("k") op v)
 			const op = node.operator.slice(0, -1);
 			const previous = get(object, key);
-			const next =
-				op === "&&" || op === "||" || op === "??"
-					? t.logicalExpression(op, previous, value)
-					: t.binaryExpression(
-							op as t.BinaryExpression["operator"],
-							previous,
-							value,
-						);
+			// Logical assignment only assigns when it has to: s.get("k") || s.set("k", v)
+			if (op === "&&" || op === "||" || op === "??") {
+				return t.logicalExpression(
+					op,
+					previous,
+					method(object, "set", [str(key), value]),
+				);
+			}
+			const next = t.binaryExpression(
+				op as t.BinaryExpression["operator"],
+				previous,
+				value,
+			);
 			return method(object, "set", [str(key), next]);
 		}
 		if (t.isObjectPattern(node.left)) {

@@ -15,6 +15,7 @@ import {
 	endBatch,
 	globalState,
 	hooks,
+	markObservable,
 	notifyOwners,
 	type Owner,
 	observableValues,
@@ -60,7 +61,15 @@ export const comparer = {
 export function isPlainObject(value: unknown): value is object {
 	if (typeof value !== "object" || value === null) return false;
 	const proto = Object.getPrototypeOf(value);
-	return proto === Object.prototype || proto === null;
+	if (proto === Object.prototype || proto === null) return true;
+	// An object literal from another realm (an iframe, node:vm), as MobX accepts: its prototype
+	// is that realm's Object.prototype.
+	return (
+		Object.getPrototypeOf(proto) === null &&
+		typeof proto.constructor === "function" &&
+		proto.constructor.name === "Object" &&
+		!Array.isArray(value)
+	);
 }
 
 /**
@@ -219,6 +228,7 @@ export class ObservableArray<T> extends Array<T> {
 		return true;
 	}
 }
+markObservable(ObservableArray.prototype);
 
 /** @internal Depend on an observable array (as its reading methods do). */
 export function observeArray(array: ObservableArray<unknown>): void {
@@ -477,6 +487,8 @@ export interface CollectionOptions {
  */
 export class ObservableMap<K, V> extends Map<K, V> {
 	private keyDeps: Map<K, Dep> | undefined;
+	/** Per key: whether it exists (`has()`), changed only when the key is added or deleted. */
+	private hasDeps: Map<K, Dep> | undefined;
 	private readonly all = new Dep();
 	private readonly prepare: <T>(value: T) => T;
 	/** Owner of the values: a held array / object changing notifies the whole map. */
@@ -521,10 +533,12 @@ export class ObservableMap<K, V> extends Map<K, V> {
 		);
 	}
 
-	private changed(key: K): void {
+	private changed(key: K, presence: boolean): void {
 		batched(() => {
 			const dep = this.keyDeps?.get(key);
 			if (dep) reportChanged(dep);
+			const hasDep = presence ? this.hasDeps?.get(key) : undefined;
+			if (hasDep) reportChanged(hasDep);
 			reportChanged(this.all);
 		});
 	}
@@ -534,19 +548,29 @@ export class ObservableMap<K, V> extends Map<K, V> {
 		return super.get(key);
 	}
 
+	/** Tracked: re-runs what read it when `key` is added or deleted (as in MobX). */
 	override has(key: K): boolean {
-		this.observeKey(key);
+		if (globalState.tracking !== null) {
+			this.hasDeps ??= new Map();
+			let dep = this.hasDeps.get(key);
+			if (!dep) {
+				dep = new Dep();
+				this.hasDeps.set(key, dep);
+			}
+			globalState.tracking.deps.add(dep);
+		}
 		return super.has(key);
 	}
 
 	override set(key: K, value: V): this {
 		const next = this.prepare(value);
-		if (super.has(key) && Object.is(super.get(key), next)) return this;
+		const existed = super.has(key);
+		if (existed && Object.is(super.get(key), next)) return this;
 		this.check(key);
 		release(super.get(key), this.owner);
 		super.set(key, next);
 		adopt(next, this.owner);
-		this.changed(key);
+		this.changed(key, !existed);
 		return this;
 	}
 
@@ -555,7 +579,7 @@ export class ObservableMap<K, V> extends Map<K, V> {
 		this.check(key);
 		release(super.get(key), this.owner);
 		super.delete(key);
-		this.changed(key);
+		this.changed(key, true);
 		return true;
 	}
 
@@ -569,6 +593,8 @@ export class ObservableMap<K, V> extends Map<K, V> {
 			for (const key of keys) {
 				const dep = this.keyDeps?.get(key);
 				if (dep) reportChanged(dep);
+				const hasDep = this.hasDeps?.get(key);
+				if (hasDep) reportChanged(hasDep);
 			}
 			reportChanged(this.all);
 		});

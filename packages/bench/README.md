@@ -1,6 +1,6 @@
 # @sobx/bench
 
-Runtime benchmarks: MobX vs the same code compiled by `@sobx/compiler` (running on `@sobx/runtime`'s `ProxyLike`), in `node:vm`. Run with:
+Runtime benchmarks: MobX vs the same code compiled by `@sobx/compiler` (running on `@sobx/runtime`'s `ProxyLike`), in `node:vm`. Each fixture runs in a function that receives the APIs as parameters (local bindings, as a module's imports are; a vm context's globals are much slower to read). `plain-code-in-compiled-module` measures the compiler's rewrites on plain values. Run with:
 
 ```bash
 pnpm bench

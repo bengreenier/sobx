@@ -8,9 +8,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const react18 = path.join(here, "test/react18/node_modules");
 
 export default defineConfig({
-	// Only the compiled specs are written against @sobx/magic (the others use @sobx/runtime
-	// directly, to compare with MobX).
-	plugins: [sobxCompiler({ include: /\.compiled\.spec\.tsx$/ })],
+	// Only the compiled specs (and the modules they use) are written against @sobx/magic; the
+	// other specs use @sobx/runtime directly, to compare with MobX.
+	plugins: [sobxCompiler({ include: /\.compiled(\.spec)?\.tsx?$/ })],
+	// The compiled specs import the package by name, as applications do.
+	resolve: {
+		alias: [
+			{ find: /^@sobx\/react$/, replacement: path.join(here, "src/index.ts") },
+		],
+	},
 	build: {
 		emptyOutDir: false, // preserve dist/types from tsc (build:types runs first)
 		lib: {

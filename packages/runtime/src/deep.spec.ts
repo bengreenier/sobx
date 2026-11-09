@@ -196,6 +196,18 @@ describe("observable objects", () => {
 		expect(structuredClone(toJS(o))).toEqual({ a: 1 });
 	});
 
+	it("can be made from object literals of another realm (as MobX)", async () => {
+		const { runInNewContext } = await import("node:vm");
+		const foreign = runInNewContext("({ a: 1, nested: { b: 2 } })") as {
+			a: number;
+			nested: { b: number };
+		};
+		const o = observable(foreign);
+		expect(isObservableObject(o)).toBe(true);
+		expect(isObservableObject(o.nested)).toBe(true);
+		expect(() => observable(runInNewContext("new (class X {})()"))).toThrow();
+	});
+
 	it("can be made from frozen objects (as MobX)", () => {
 		const source = Object.freeze({ a: 1, nested: Object.freeze({ b: 2 }) });
 		// The observable copy is writable, even though the source's type is readonly.

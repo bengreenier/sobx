@@ -34,6 +34,7 @@ import {
 	endBatch,
 	globalState,
 	hooks,
+	markObservable,
 	notifyOwners,
 	observableValues,
 	runAction,
@@ -104,6 +105,7 @@ function administration(target: object): ProxyLike<AnyRecord> {
 		// Values are enhanced per annotation, not by the store.
 		adm = new ProxyLike<AnyRecord>({}, { deep: false });
 		Object.defineProperty(target, ADMINISTRATION, { value: adm });
+		markObservable(target);
 		observableValues.add(target);
 	}
 	return adm;
@@ -159,10 +161,21 @@ export function isAction(fn: unknown): boolean {
 	return typeof fn === "function" && actions.has(fn);
 }
 
+/**
+ * Whether `o`, a prototype of `target`, is `Object.prototype` (of this realm, or of another one,
+ * such as an iframe's or a `node:vm` context's), where looking for members stops.
+ */
+function isObjectPrototype(o: object, target: object): boolean {
+	return (
+		o === Object.prototype ||
+		(o !== target && Object.getPrototypeOf(o) === null)
+	);
+}
+
 function describe(target: object, key: PropertyKey): PropertyDescriptor | null {
 	for (
 		let o: object | null = target;
-		o && o !== Object.prototype;
+		o && !isObjectPrototype(o, target);
 		o = Object.getPrototypeOf(o)
 	) {
 		const descriptor = Object.getOwnPropertyDescriptor(o, key);
@@ -347,7 +360,7 @@ export function makeAutoObservable<T extends object>(
 	}
 	for (
 		let o: object | null = target;
-		o && o !== Object.prototype;
+		o && !isObjectPrototype(o, target);
 		o = Object.getPrototypeOf(o)
 	) {
 		for (const key of Reflect.ownKeys(o)) {

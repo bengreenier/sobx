@@ -5,6 +5,7 @@ import {
 	Dep,
 	type Equals,
 	globalState,
+	markObservable,
 	type Owner,
 	observableValues,
 	release,
@@ -81,6 +82,8 @@ export class ProxyLike<T extends object> {
 	private readonly deep: boolean;
 	/** Tracks the set of keys (`keys()`), created on first tracked use. */
 	private keysDep: Dep | undefined;
+	/** Per key: whether it exists (`has()`), changed only when the key is added or deleted. */
+	private presenceDeps: Map<keyof T, Dep> | undefined;
 	/** Per-key {@link Owner}s of the observable values held. */
 	private keyOwners: Map<keyof T, Owner> | undefined;
 
@@ -161,10 +164,27 @@ export class ProxyLike<T extends object> {
 		) as Array<keyof T & string>;
 	}
 
-	/** Whether `key` is a property. Tracked, including for keys that don't exist yet. */
+	/**
+	 * Whether `key` is a property. Tracked, including for keys that don't exist yet: re-runs
+	 * what read it when the key is added or deleted (not when its value changes, as in MobX).
+	 */
 	has(key: keyof T): boolean {
-		if (globalState.tracking !== null) this.observe(key);
+		if (globalState.tracking !== null) {
+			this.presenceDeps ??= new Map();
+			let dep = this.presenceDeps.get(key);
+			if (!dep) {
+				dep = new Dep();
+				this.presenceDeps.set(key, dep);
+			}
+			globalState.tracking.deps.add(dep);
+		}
 		return Object.hasOwn(this.target, key);
+	}
+
+	/** Tell `has(key)` readers that `key` was added or deleted. */
+	private presenceChanged(key: keyof T): void {
+		const dep = this.presenceDeps?.get(key);
+		if (dep) reportChanged(dep);
 	}
 
 	/** @internal Use `equals` instead of `Object.is` to decide whether `key` changed. */
@@ -261,8 +281,7 @@ export class ProxyLike<T extends object> {
 		if (this.deep && typeof value === "object" && value !== null) {
 			value = enhance(value);
 		}
-		const isNewKey =
-			this.keysDep !== undefined && !Object.hasOwn(this.target, key);
+		const isNewKey = !Object.hasOwn(this.target, key);
 		const previous = this.target[key];
 		this.target[key] = value;
 		if (previous !== value) {
@@ -287,7 +306,10 @@ export class ProxyLike<T extends object> {
 			checkWrite(dep, String(key));
 			if (dep) reportChanged(dep);
 		}
-		if (isNewKey) reportChanged(this.keysDep as Dep);
+		if (isNewKey) {
+			if (this.keysDep) reportChanged(this.keysDep);
+			this.presenceChanged(key);
+		}
 		return value;
 	}
 
@@ -312,6 +334,8 @@ export class ProxyLike<T extends object> {
 		this.set(key, undefined as T[K]);
 		const deleted = delete this.target[key];
 		if (this.keysDep) reportChanged(this.keysDep);
+		this.presenceChanged(key);
 		return deleted;
 	}
 }
+markObservable(ProxyLike.prototype);

@@ -51,6 +51,16 @@ const VALUES: &[&str] = &[
     "untracked",
     "values",
 ];
+/// The React bindings, whose hooks create observables.
+pub const REACT_MODULE: &str = "@sobx/react";
+/// `@sobx/react` hooks that return an observable made from their initializer's result.
+const LOCAL_OBSERVABLE_HOOKS: &[&str] = &["useLocalObservable", "useLocalStore"];
+/// Constructors of globals that never return observables.
+const PLAIN_CONSTRUCTORS: &[&str] = &[
+    "Array", "ArrayBuffer", "Date", "Error", "Map", "Object", "Promise", "RegExp", "Set", "URL",
+    "URLSearchParams", "WeakMap", "WeakSet",
+];
+
 /// `observable.<kind>(...)` constructors.
 const OBSERVABLE_VALUES: &[&str] = &["array", "box", "map", "set"];
 const ANNOTATING: &[&str] = &["observable", "makeObservable", "makeAutoObservable"];
@@ -156,6 +166,9 @@ pub struct Analyzer<'s, 'a> {
     reported: HashSet<NodeId>,
     member_fns: HashMap<String, (NodeId, bool)>,
     fn_info: HashMap<NodeId, FnInfo>,
+    /// Calls of `@sobx/react`'s local observable hooks, and which hook.
+    hook_calls: Vec<(NodeId, &'static str)>,
+    untraced: Vec<ir::UntracedOperation>,
 }
 
 impl<'s, 'a> Analyzer<'s, 'a> {
@@ -200,6 +213,8 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             reported: HashSet::new(),
             member_fns: HashMap::new(),
             fn_info: HashMap::new(),
+            hook_calls: vec![],
+            untraced: vec![],
         }
     }
 
@@ -236,6 +251,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             }
         }
         self.register_decorated_classes();
+        for (call, hook) in self.hook_calls.clone() {
+            self.visit_local_observable_hook(call, hook);
+        }
 
         // Derivations and remaining actions, so accesses can be attributed to them.
         for call in self.sorted(&["reaction", "autorun", "when"]) {
@@ -269,6 +287,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             }
         }
 
+        self.visit_untraced_operations();
         let mut accesses = self.finalize();
         self.renumber(&mut accesses);
         self.diagnostics
@@ -287,6 +306,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             actions: self.actions,
             unsupported: self.unsupported,
             diagnostics: self.diagnostics,
+            untraced_operations: self.untraced,
         }
     }
 
@@ -379,10 +399,58 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 }
             }
         }
+        self.collect_react_imports();
         refs.sort_by_key(|(node, _, _)| self.node_span(*node).start);
         for (node, api, local) in refs {
             self.classify_api_reference(node, api, &local);
         }
+    }
+
+    /// Calls of `@sobx/react`'s local observable hooks (`useLocalObservable(() => ({...}))`).
+    fn collect_react_imports(&mut self) {
+        for stmt in &self.program.body {
+            let Statement::ImportDeclaration(decl) = stmt else { continue };
+            if decl.source.value.as_str() != Some(REACT_MODULE) || decl.import_kind.is_type() {
+                continue;
+            }
+            let Some(specifiers) = &decl.specifiers else { continue };
+            for spec in specifiers {
+                let ImportDeclarationSpecifier::ImportSpecifier(s) = spec else { continue };
+                if s.import_kind.is_type() {
+                    continue;
+                }
+                let imported = s.imported.name();
+                let Some(hook) = LOCAL_OBSERVABLE_HOOKS.iter().find(|h| **h == imported.as_str()) else { continue };
+                for node in self.value_refs(s.local.symbol_id()) {
+                    let callee = self.outer(node);
+                    let span = self.node_span(callee);
+                    if let Some(call) = self.parent(callee)
+                        && matches!(self.kind(call), AstKind::CallExpression(c) if c.callee.span() == span)
+                    {
+                        self.hook_calls.push((call, hook));
+                    }
+                }
+            }
+        }
+        let mut calls = std::mem::take(&mut self.hook_calls);
+        calls.sort_by_key(|(call, _)| self.node_span(*call).start);
+        self.hook_calls = calls;
+    }
+
+    /// `useLocalObservable(() => ({...}), annotations?)` / `useLocalStore(() => ({...}))`: a
+    /// runtime observable shaped like the object literal the initializer returns.
+    fn visit_local_observable_hook(&mut self, call_id: NodeId, hook: &'static str) {
+        let AstKind::CallExpression(call) = self.kind(call_id) else { return };
+        let object = call.arguments.first().and_then(|a| match a {
+            Argument::ArrowFunctionExpression(f) => match &f.body {
+                ArrowFunctionBody::FunctionBody(b) => returned_object(b),
+                body => body.as_expression().and_then(object_literal),
+            },
+            Argument::FunctionExpression(f) => f.body.as_ref().and_then(|b| returned_object(b)),
+            _ => None,
+        });
+        let annotations = if hook == "useLocalObservable" { call.arguments.get(1) } else { None };
+        self.create_object_observable(call_id, call, hook, object, annotations);
     }
 
     fn classify_api_reference(&mut self, node: NodeId, api: Option<&'static str>, local: &str) {
@@ -659,7 +727,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                     vec![id.clone()],
                 );
             }
-        } else {
+        } else if !LOCAL_OBSERVABLE_HOOKS.contains(&source) {
             self.diagnose(
                 "unbound-observable",
                 "error",
@@ -2382,6 +2450,213 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         );
     }
 
+    // -- untraced values ---------------------------------------------------------------
+
+    /// Property operations that only a `Proxy` would observe (dynamic keys, array index /
+    /// `length`, writes, `delete`, `in`, `Object.keys`), on values whose origin can't be traced
+    /// (parameters such as props, imports, call results such as `useContext()`...): they may be
+    /// observables, so the compiler rewrites them to runtime helpers, which behave as plain
+    /// JavaScript on other values. Values known to be observables are handled precisely
+    /// elsewhere; values known to be plain (literals, local objects...) are left alone.
+    fn visit_untraced_operations(&mut self) {
+        let mut out: Vec<ir::UntracedOperation> = vec![];
+        for node in self.nodes.iter() {
+            let id = node.id();
+            match node.kind() {
+                AstKind::AssignmentExpression(a) => {
+                    let (object, key, span) = match &a.left {
+                        AssignmentTarget::StaticMemberExpression(m) => {
+                            (&m.object, AccessKey::Static { name: m.property.name.as_str().to_string() }, m.span)
+                        }
+                        AssignmentTarget::ComputedMemberExpression(m) => (&m.object, computed_key(&m.expression), m.span),
+                        _ => continue,
+                    };
+                    if self.maybe_observable(object, id) {
+                        out.push(ir::UntracedOperation { kind: "write", key, span: self.span_of(span) });
+                    }
+                }
+                AstKind::UpdateExpression(u) => {
+                    let (object, key, span) = match &u.argument {
+                        SimpleAssignmentTarget::StaticMemberExpression(m) => {
+                            (&m.object, AccessKey::Static { name: m.property.name.as_str().to_string() }, m.span)
+                        }
+                        SimpleAssignmentTarget::ComputedMemberExpression(m) => {
+                            (&m.object, computed_key(&m.expression), m.span)
+                        }
+                        _ => continue,
+                    };
+                    if self.maybe_observable(object, id) {
+                        out.push(ir::UntracedOperation { kind: "write", key, span: self.span_of(span) });
+                    }
+                }
+                AstKind::UnaryExpression(u) if u.operator == UnaryOperator::Delete => {
+                    let (object, key, span) = match &u.argument {
+                        Expression::StaticMemberExpression(m) => {
+                            (&m.object, AccessKey::Static { name: m.property.name.as_str().to_string() }, m.span)
+                        }
+                        Expression::ComputedMemberExpression(m) => (&m.object, computed_key(&m.expression), m.span),
+                        _ => continue,
+                    };
+                    if self.maybe_observable(object, id) {
+                        out.push(ir::UntracedOperation { kind: "delete", key, span: self.span_of(span) });
+                    }
+                }
+                AstKind::BinaryExpression(b) if b.operator == BinaryOperator::In => {
+                    if self.maybe_observable(&b.right, id) {
+                        out.push(ir::UntracedOperation { kind: "in", key: AccessKey::Dynamic, span: self.span_of(b.span) });
+                    }
+                }
+                AstKind::CallExpression(c) => {
+                    if let Expression::StaticMemberExpression(m) = &c.callee
+                        && let Expression::Identifier(object) = &m.object
+                        && object.name.as_str() == "Object"
+                        && matches!(m.property.name.as_str(), "keys" | "values" | "entries")
+                        && self.scoping.get_reference(object.reference_id()).symbol_id().is_none()
+                        && c.arguments.len() == 1
+                        && let Some(arg) = c.arguments[0].as_expression()
+                        && self.maybe_observable(arg, id)
+                    {
+                        out.push(ir::UntracedOperation {
+                            kind: "enumerate",
+                            key: AccessKey::Dynamic,
+                            span: self.span_of(c.span),
+                        });
+                    }
+                }
+                AstKind::ComputedMemberExpression(m) => {
+                    let key = computed_key(&m.expression);
+                    let unobserved = match &key {
+                        AccessKey::Dynamic => true,
+                        AccessKey::Static { name } => name == "length" || is_index_name(name),
+                    };
+                    if unobserved && self.is_plain_read(id, m.span) && self.maybe_observable(&m.object, id) {
+                        out.push(ir::UntracedOperation { kind: "read", key, span: self.span_of(m.span) });
+                    }
+                }
+                AstKind::StaticMemberExpression(m)
+                    if m.property.name.as_str() == "length"
+                        && self.is_plain_read(id, m.span)
+                        && self.maybe_observable(&m.object, id) =>
+                {
+                    out.push(ir::UntracedOperation {
+                        kind: "read",
+                        key: AccessKey::Static { name: "length".into() },
+                        span: self.span_of(m.span),
+                    });
+                }
+                _ => {}
+            }
+        }
+        out.sort_by_key(|o| (o.span.start, o.span.end));
+        self.untraced = out;
+    }
+
+    /// Whether the member at `member` is only read: not written, deleted, called (which would
+    /// lose `this`), part of an optional chain, or a destructuring / loop target.
+    fn is_plain_read(&self, member: NodeId, span: oxc_span::Span) -> bool {
+        let mut current = member;
+        let mut current_span = span;
+        loop {
+            let Some(parent) = self.parent(current) else { return true };
+            let kind = self.kind(parent);
+            match kind {
+                AstKind::ChainExpression(_) => return false,
+                // Wrappers and enclosing members: keep looking for an optional chain.
+                AstKind::StaticMemberExpression(m) if m.object.span() == current_span => {}
+                AstKind::ComputedMemberExpression(m) if m.object.span() == current_span => {}
+                AstKind::TSNonNullExpression(_)
+                | AstKind::TSAsExpression(_)
+                | AstKind::TSSatisfiesExpression(_)
+                | AstKind::ParenthesizedExpression(_) => {}
+                AstKind::CallExpression(c) if c.callee.span() == current_span => {
+                    if current == member {
+                        return false; // a method call: keep `this`
+                    }
+                }
+                _ if current != member => return true,
+                AstKind::AssignmentExpression(a) => return a.left.span() != span,
+                AstKind::UpdateExpression(_) => return false,
+                AstKind::UnaryExpression(u) => return u.operator != UnaryOperator::Delete,
+                AstKind::NewExpression(n) => return n.callee.span() != span,
+                AstKind::TaggedTemplateExpression(t) => return t.tag.span() != span,
+                AstKind::ForInStatement(_)
+                | AstKind::ForOfStatement(_)
+                | AstKind::ArrayAssignmentTarget(_)
+                | AstKind::AssignmentTargetRest(_)
+                | AstKind::AssignmentTargetWithDefault(_)
+                | AstKind::AssignmentTargetPropertyProperty(_)
+                | AstKind::ObjectAssignmentTarget(_) => return false,
+                _ => return true,
+            }
+            current = parent;
+            current_span = self.node_span(parent);
+        }
+    }
+
+    /// Whether `expr` may evaluate to an observable the analyzer doesn't know about.
+    fn maybe_observable(&self, expr: &Expression, at: NodeId) -> bool {
+        match expr {
+            Expression::StaticMemberExpression(m) => self.maybe_observable(&m.object, at),
+            Expression::ComputedMemberExpression(m) => self.maybe_observable(&m.object, at),
+            Expression::PrivateFieldExpression(m) => self.maybe_observable(&m.object, at),
+            Expression::ParenthesizedExpression(e) => self.maybe_observable(&e.expression, at),
+            Expression::TSNonNullExpression(e) => self.maybe_observable(&e.expression, at),
+            Expression::TSAsExpression(e) => self.maybe_observable(&e.expression, at),
+            Expression::TSSatisfiesExpression(e) => self.maybe_observable(&e.expression, at),
+            Expression::TSTypeAssertion(e) => self.maybe_observable(&e.expression, at),
+            Expression::Identifier(id) => {
+                let Some(symbol) = self.scoping.get_reference(id.reference_id()).symbol_id() else {
+                    return false; // a global
+                };
+                !self.symbol_observable.contains_key(&symbol) && self.untraced_symbol(symbol)
+            }
+            // `this` of an observable object or class is analyzed; any other `this` may be one.
+            Expression::ThisExpression(_) => match self.this_owner(at) {
+                Some(owner) => !self.this_owners.contains_key(&owner),
+                None => true,
+            },
+            Expression::ChainExpression(_)
+            | Expression::CallExpression(_)
+            | Expression::AwaitExpression(_)
+            | Expression::ConditionalExpression(_)
+            | Expression::LogicalExpression(_)
+            | Expression::SequenceExpression(_)
+            | Expression::AssignmentExpression(_)
+            | Expression::YieldExpression(_)
+            | Expression::NewExpression(_)
+            | Expression::TaggedTemplateExpression(_)
+            | Expression::ImportExpression(_) => !is_fresh_value(expr, self.scoping),
+            _ => false,
+        }
+    }
+
+    /// Whether a binding's value can't be traced: parameters, imports (other than the APIs),
+    /// variables initialized from anything but a fresh value, or reassigned.
+    fn untraced_symbol(&self, symbol: SymbolId) -> bool {
+        let decl = self.scoping.symbol_declaration(symbol);
+        match self.kind(decl) {
+            AstKind::ImportSpecifier(_) | AstKind::ImportDefaultSpecifier(_) | AstKind::ImportNamespaceSpecifier(_) => {
+                let source = self.parent(decl).and_then(|p| match self.kind(p) {
+                    AstKind::ImportDeclaration(d) => Some(d.source.value.display().to_string()),
+                    _ => None,
+                });
+                source.is_none_or(|s| s != self.module_specifier && s != REACT_MODULE)
+            }
+            AstKind::Function(_) | AstKind::Class(_) => false,
+            AstKind::VariableDeclarator(d) => {
+                let simple = matches!(&d.id, BindingPattern::BindingIdentifier(b) if b.symbol_id() == symbol);
+                let fresh = d.init.as_ref().is_some_and(|init| is_fresh_value(init, self.scoping));
+                let reassigned = self
+                    .scoping
+                    .get_resolved_reference_ids(symbol)
+                    .iter()
+                    .any(|r| self.scoping.get_reference(*r).is_write());
+                !(simple && fresh && !reassigned)
+            }
+            _ => true,
+        }
+    }
+
     /// Entities are discovered in dependency order; reassign ids in source order and rewrite
     /// every cross-reference.
     fn renumber(&mut self, accesses: &mut [ir::Access]) {
@@ -2764,6 +3039,67 @@ fn param_count(params: &FormalParameters) -> u32 {
 
 fn js_number_string(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e21 { format!("{}", v as i64) } else { format!("{v}") }
+}
+
+/// The object literal a function body ends by returning (`{ ...; return {...} }`).
+fn returned_object<'a>(body: &'a FunctionBody<'a>) -> Option<&'a ObjectExpression<'a>> {
+    match body.statements.last()? {
+        Statement::ReturnStatement(r) => object_literal(r.argument.as_ref()?),
+        _ => None,
+    }
+}
+
+fn object_literal<'a>(expr: &'a Expression<'a>) -> Option<&'a ObjectExpression<'a>> {
+    match expr {
+        Expression::ObjectExpression(o) => Some(o),
+        Expression::ParenthesizedExpression(e) => object_literal(&e.expression),
+        Expression::TSAsExpression(e) => object_literal(&e.expression),
+        Expression::TSSatisfiesExpression(e) => object_literal(&e.expression),
+        _ => None,
+    }
+}
+
+/// Whether `expr` makes a new value that can't be an observable (a literal, a function, a
+/// built-in object...).
+fn is_fresh_value(expr: &Expression, scoping: &Scoping) -> bool {
+    match expr {
+        Expression::ObjectExpression(_)
+        | Expression::ArrayExpression(_)
+        | Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::RegExpLiteral(_)
+        | Expression::TemplateLiteral(_)
+        | Expression::ArrowFunctionExpression(_)
+        | Expression::FunctionExpression(_)
+        | Expression::ClassExpression(_) => true,
+        Expression::ParenthesizedExpression(e) => is_fresh_value(&e.expression, scoping),
+        Expression::TSAsExpression(e) => is_fresh_value(&e.expression, scoping),
+        Expression::TSSatisfiesExpression(e) => is_fresh_value(&e.expression, scoping),
+        Expression::NewExpression(n) => match &n.callee {
+            Expression::Identifier(id) => {
+                scoping.get_reference(id.reference_id()).symbol_id().is_none()
+                    && PLAIN_CONSTRUCTORS.contains(&id.name.as_str())
+            }
+            _ => false,
+        },
+        // `Object.keys(...)`: an array of strings.
+        Expression::CallExpression(c) => matches!(
+            &c.callee,
+            Expression::StaticMemberExpression(m)
+                if m.property.name.as_str() == "keys"
+                    && matches!(&m.object, Expression::Identifier(o)
+                        if o.name.as_str() == "Object"
+                            && scoping.get_reference(o.reference_id()).symbol_id().is_none())
+        ),
+        _ => false,
+    }
+}
+
+fn is_index_name(name: &str) -> bool {
+    name == "0" || (!name.is_empty() && !name.starts_with('0') && name.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn computed_key(expr: &Expression) -> AccessKey {

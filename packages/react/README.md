@@ -32,7 +32,7 @@ const Counter = observer(() => {
 
 Files written against `@sobx/magic` need the [sobx compiler](../compiler); `.tsx` / `.jsx` files are compiled like any other. `@sobx/react` itself isn't compiled: it's a library on top of [`@sobx/runtime`](../runtime).
 
-sobx never uses `Proxy`, so the usual sobx rule applies to observables a component uses without the compiler seeing where they came from (imported from another module, props, `useLocalObservable`, context): reading and writing their declared properties is tracked, but adding or deleting keys, `in`, `Object.keys` and array index / `length` writes must use the explicit API (`set`, `remove`, `has`, `keys`, `array.set(i, v)`, ...). See [what's supported](../../docs/support.md).
+sobx never uses `Proxy`. Observables a component gets from props, context, a hook or another module are values the compiler can't trace, so in modules importing `@sobx/magic` or `@sobx/react` it compiles their dynamic keys, array index / `length` reads, `in`, `Object.keys` and writes (including new keys and `delete`) to runtime calls, which behave as plain JavaScript on plain values. `useLocalObservable(() => ({...}))` is analyzed from its object literal. The one thing that needs care: a dot-syntax read of a key that doesn't exist yet on such a value (`props.store.later`) isn't tracked; declare the key, or use `get(store, "later")`. See [what's supported](../../docs/support.md#values-whose-origin-cant-be-traced).
 
 ## Install
 

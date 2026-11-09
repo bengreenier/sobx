@@ -90,21 +90,50 @@ function stripSobxImport(code: string): string {
 	);
 }
 
+/**
+ * Run `code` in a fresh `node:vm` context, with `bindings` as parameters of a wrapping function:
+ * local bindings, like a module's imports (globals of a vm context are much slower to read).
+ * Returns the time `code` took.
+ */
+function runScript(code: string, bindings: Record<string, unknown>): number {
+	const names = Object.keys(bindings);
+	const fn = vm.runInNewContext(
+		`(function (${names.join(", ")}) {
+${code}
+})`,
+		{},
+	) as (...args: unknown[]) => void;
+	const start = now();
+	fn(...names.map((name) => bindings[name]));
+	return now() - start;
+}
+
 function runMobX(basename: string, iterations: number): number {
 	const source = stripDeclareIterations(
 		stripMobxImport(loadBenchSource(basename)),
 	);
-	const context = {
+	return runScript(source, {
 		observable,
 		reaction,
 		runInAction,
 		console: { log: () => {} },
 		iterations,
-		Math: globalThis.Math,
-	};
-	const start = now();
-	vm.runInNewContext(source, context);
-	return now() - start;
+	});
+}
+
+/** The bindings the compiled code imports from @sobx/runtime (`{ a, b as c }`), by local name. */
+function runtimeImports(code: string): Record<string, unknown> {
+	const runtime = sobxRuntime as Record<string, unknown>;
+	const bindings: Record<string, unknown> = {};
+	for (const [, list] of code.matchAll(
+		/import\s*\{([^}]*)\}\s*from\s*["']@sobx\/runtime["']/g,
+	)) {
+		for (const specifier of (list as string).split(",")) {
+			const [imported, local = imported] = specifier.trim().split(/\s+as\s+/);
+			if (imported) bindings[local as string] = runtime[imported];
+		}
+	}
+	return bindings;
 }
 
 function runSobx(basename: string, iterations: number): number {
@@ -113,15 +142,11 @@ function runSobx(basename: string, iterations: number): number {
 	const code = stripDeclareIterations(
 		stripSobxImport(stripMobxImport(compiled)),
 	);
-	const context = {
-		...sobxRuntime,
+	return runScript(code, {
+		...runtimeImports(compiled),
 		console: { log: () => {} },
 		iterations,
-		Math: globalThis.Math,
-	};
-	const start = now();
-	vm.runInNewContext(code, context);
-	return now() - start;
+	});
 }
 
 const benchNames = listBenchInputs();

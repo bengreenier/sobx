@@ -18,9 +18,11 @@ import {
 } from "./plan.js";
 
 export const DEFAULT_MODULE_SPECIFIER = "@sobx/magic";
+/** The React bindings: modules using them are compiled too (their hooks create observables). */
+export const REACT_MODULE = "@sobx/react";
 
 export interface TransformSobxOptions {
-	/** Module specifier to treat as sobx (only transform when imported from here). Default `"@sobx/magic"`. */
+	/** Module specifier to treat as sobx. Default `"@sobx/magic"`. Only modules that import it (or `"@sobx/react"`) are transformed. */
 	moduleSpecifier?: string;
 	/** Filename, passed to the analyzer and used in diagnostics. */
 	filename?: string;
@@ -44,7 +46,7 @@ export function compileUnit(
 	options: TransformSobxOptions = {},
 ): CompileUnit {
 	const moduleSpecifier = options.moduleSpecifier ?? DEFAULT_MODULE_SPECIFIER;
-	if (!source.includes(moduleSpecifier)) {
+	if (!source.includes(moduleSpecifier) && !source.includes(REACT_MODULE)) {
 		return { plan: emptyPlan(moduleSpecifier), diagnostics: [] };
 	}
 	const mod = analyze(source, { moduleSpecifier, filename: options.filename });

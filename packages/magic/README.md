@@ -8,7 +8,7 @@ The MobX-compatible API you write sobx code against. Its exports are placeholder
 
 Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to your build. MobX code using observable objects, arrays, Maps, Sets and boxes (deep by default), classes (`makeObservable` / `makeAutoObservable` / standard decorators), `computed`, `reaction`, `autorun`, `when`, actions, `flow`, `toJS` and `configure` works unchanged.
 
-sobx never uses `Proxy`. The compiler turns the operations MobX observes through proxies (adding / deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` writes) into explicit runtime calls where it can see the observable; elsewhere (a function receiving an observable, an alias), use the explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
+sobx never uses `Proxy`. The compiler turns the operations MobX observes through proxies (adding / deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` reads and writes) into runtime calls: on the observables it sees created, and on values whose origin it can't trace (parameters, imports, call results), which may be observables (the runtime calls behave as plain JavaScript otherwise). In modules the compiler doesn't process (those that import neither `@sobx/magic` nor `@sobx/react`), and to read a key that doesn't exist yet through a value the compiler can't trace, use the explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
 
 A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
@@ -67,14 +67,17 @@ runInAction(() => {
 
 ## Benchmarks
 
-Runtime comparison (MobX vs the same code compiled by sobx), same workload in `node:vm`, 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via [`packages/bench`](../bench).
+Runtime comparison (MobX vs the same code compiled by sobx), same workload in `node:vm` (with the APIs passed as local bindings, like a module's imports), 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via [`packages/bench`](../bench).
 
 | Fixture | MobX (ms) | sobx (ms) | sobx vs MobX |
 |---|---|---|---|
-| combined-reaction-on-name | 460.37 | 179.19 | **156.9% faster** |
-| counter-increment | 497.97 | 164.01 | **203.6% faster** |
-| multiple-reactions | 469.38 | 152.09 | **208.6% faster** |
-| observable-writes-only | 228.08 | 107.96 | **111.3% faster** |
-| sync-effect | 512.73 | 196.81 | **160.5% faster** |
+| combined-reaction-on-name | 359.05 | 101.46 | **253.9% faster** |
+| counter-increment | 351.68 | 69.33 | **407.3% faster** |
+| multiple-reactions | 355.12 | 84.47 | **320.4% faster** |
+| observable-writes-only | 84.08 | 22.41 | **275.1% faster** |
+| sync-effect | 355.07 | 94.03 | **277.6% faster** |
+| plain-code-in-compiled-module | 59.08 | 64.05 | 8.4% slower |
+
+`plain-code-in-compiled-module` measures what the compiler's rewrites cost on plain values: a loop of index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction. Inside reactions, computeds and observer renders those reads go through the runtime's helpers to be tracked.
 
 These numbers are with full MobX semantics: tracked dependencies, batching, equality checks. Earlier, faster figures came from an inlined reaction that didn't behave like MobX.

@@ -75,7 +75,7 @@ exports[`analyze: fixtures > combined.input.ts 1`] = `
       "span": "1:21-1:29",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -157,6 +157,7 @@ exports[`analyze: fixtures > combined.input.ts 1`] = `
     },
   ],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -235,7 +236,7 @@ exports[`analyze: fixtures > mobx-counter.input.ts 1`] = `
       "span": "1:21-1:29",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -302,6 +303,7 @@ exports[`analyze: fixtures > mobx-counter.input.ts 1`] = `
     },
   ],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -365,7 +367,7 @@ exports[`analyze: fixtures > mobx-multiple-reactions.input.ts 1`] = `
       "span": "1:21-1:29",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -471,6 +473,7 @@ exports[`analyze: fixtures > mobx-multiple-reactions.input.ts 1`] = `
     },
   ],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -516,7 +519,7 @@ exports[`analyze: fixtures > mobx-sync-effect.input.ts 1`] = `
       "span": "1:21-1:29",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -583,6 +586,7 @@ exports[`analyze: fixtures > mobx-sync-effect.input.ts 1`] = `
     },
   ],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -602,7 +606,7 @@ exports[`analyze: fixtures > observable.input.ts 1`] = `
       "span": "1:9-1:19",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -644,6 +648,7 @@ exports[`analyze: fixtures > observable.input.ts 1`] = `
   ],
   "reactions": [],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -681,7 +686,7 @@ exports[`analyze: fixtures > property-read.input.ts 1`] = `
       "span": "1:9-1:19",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -723,6 +728,7 @@ exports[`analyze: fixtures > property-read.input.ts 1`] = `
   ],
   "reactions": [],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -759,7 +765,7 @@ exports[`analyze: fixtures > property-write.input.ts 1`] = `
       "span": "1:9-1:19",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -801,6 +807,7 @@ exports[`analyze: fixtures > property-write.input.ts 1`] = `
   ],
   "reactions": [],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;
 
@@ -846,7 +853,7 @@ exports[`analyze: fixtures > reaction.input.ts 1`] = `
       "span": "1:21-1:29",
     },
   ],
-  "irVersion": 4,
+  "irVersion": 5,
   "kind": "Module",
   "moduleSpecifier": "mobx",
   "observables": [
@@ -913,5 +920,6 @@ exports[`analyze: fixtures > reaction.input.ts 1`] = `
     },
   ],
   "unsupported": [],
+  "untracedOperations": [],
 }
 `;

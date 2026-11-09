@@ -174,13 +174,14 @@ export function entries(target: object): Array<[unknown, unknown]> {
 // Emitted by @sobx/compiler for property operations on values it knows may be observable. They
 // fall back to the plain JavaScript operation for anything else.
 
-const isObservableObjectLike = (target: unknown): target is object =>
-	typeof target === "object" &&
-	target !== null &&
-	(target instanceof ProxyLike || administrationOf(target) !== undefined);
+const isObservableObjectLike = (target: object): boolean =>
+	target instanceof ProxyLike || administrationOf(target) !== undefined;
 
 /** `target[key]`, tracked for observable arrays (index / `length`) and missing keys of observable objects. */
 export function getProperty(target: unknown, key: PropertyKey): unknown {
+	if (typeof target !== "object" || target === null) {
+		return (target as AnyRecord)[key];
+	}
 	if (target instanceof ObservableArray) {
 		if (key === "length") {
 			observeArray(target);
@@ -194,6 +195,10 @@ export function getProperty(target: unknown, key: PropertyKey): unknown {
 
 /** `target[key] = value`, observed for observable arrays and objects (adding new keys). */
 export function setProperty<V>(target: unknown, key: PropertyKey, value: V): V {
+	if (typeof target !== "object" || target === null) {
+		(target as AnyRecord)[key] = value;
+		return value;
+	}
 	if (target instanceof ObservableArray) {
 		if (key === "length") target.setLength(Number(value));
 		else if (isIndexKey(key)) target.set(index(key), value);
@@ -226,6 +231,9 @@ export function updateProperty(
 
 /** `delete target[key]`, observed for observable arrays and objects. */
 export function deleteProperty(target: unknown, key: PropertyKey): boolean {
+	if (typeof target !== "object" || target === null) {
+		return delete (target as AnyRecord)[key];
+	}
 	if (target instanceof ObservableArray && isIndexKey(key)) {
 		return target.deleteIndex(index(key));
 	}
@@ -238,6 +246,9 @@ export function deleteProperty(target: unknown, key: PropertyKey): boolean {
 
 /** `key in target`, tracked for observable objects (including keys added later) and arrays. */
 export function hasProperty(target: unknown, key: PropertyKey): boolean {
+	if (typeof target !== "object" || target === null) {
+		return key in (target as object);
+	}
 	if (target instanceof ObservableArray) {
 		observeArray(target);
 		return key in target;

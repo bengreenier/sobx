@@ -35,9 +35,11 @@ export {
 } from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
 export {
+	$sobx,
 	batch,
 	currentTracking,
 	type EnforceActions,
+	globalState,
 	untracked,
 } from "./core.js";
 export {

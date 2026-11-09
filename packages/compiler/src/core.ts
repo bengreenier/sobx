@@ -16,7 +16,7 @@ export interface SobxCompilerOptions {
 	 */
 	exclude?: string | RegExp | (string | RegExp)[];
 	/**
-	 * Module specifier to treat as sobx (only transform when imported from here). Default `"@sobx/magic"`.
+	 * Module specifier to treat as sobx. Default `"@sobx/magic"`. Only modules that import it (or `"@sobx/react"`) are transformed.
 	 */
 	moduleSpecifier?: string;
 	/**

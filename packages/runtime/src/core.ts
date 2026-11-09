@@ -81,6 +81,19 @@ export function checkWriteIf(observed: boolean, what: string): void {
 	);
 }
 
+/**
+ * Present (`true`) on the values whose properties the compiler helpers handle differently from
+ * plain JavaScript: observable arrays, `ProxyLike`s and accessor-based observable objects and
+ * classes. Compiled writes check it inline (`o[$sobx] !== undefined ? setProperty(...) : ...`),
+ * so writes to plain values run as they are.
+ */
+export const $sobx: unique symbol = Symbol("sobx");
+
+/** Mark `target` (an object or a prototype) with {@link $sobx}. */
+export function markObservable(target: object): void {
+	Object.defineProperty(target, $sobx, { value: true });
+}
+
 /** Every observable value (arrays, objects, Maps, Sets, boxes, ProxyLike, classes). */
 export const observableValues = new WeakSet<object>();
 

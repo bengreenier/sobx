@@ -233,6 +233,37 @@ describe("parity with MobX: objects", () => {
 });
 
 describe("parity with MobX: Maps, Sets, boxes", () => {
+	parity(
+		"has() tracks presence, not values",
+		({ observable, autorun, runInAction, has, set, remove }, log) => {
+			const m = observable(new Map<string, number>());
+			const o = observable({ tags: {} as Record<string, number> });
+			const tags = o.tags;
+			let mapRuns = 0;
+			let objectRuns = 0;
+			autorun(() => {
+				mapRuns++;
+				log("map has a", m.has("a"));
+			});
+			autorun(() => {
+				objectRuns++;
+				log("object has a", has(tags, "a"));
+			});
+			runInAction(() => {
+				m.set("a", 1);
+				set(tags, "a", 1);
+			});
+			runInAction(() => {
+				m.set("a", 2);
+				set(tags, "a", 2);
+			});
+			runInAction(() => {
+				m.delete("a");
+				remove(tags, "a");
+			});
+			log("runs", mapRuns, objectRuns);
+		},
+	);
 	parity("maps", ({ observable, autorun, runInAction }, log) => {
 		const m = observable(new Map([["a", 1]]));
 		autorun(() => log(m.get("b") ?? null, m.has("c"), m.size, [...m.keys()]));

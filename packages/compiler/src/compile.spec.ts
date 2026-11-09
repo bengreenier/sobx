@@ -651,6 +651,16 @@ store.count += 1;`);
 		expect(out).not.toMatch(/store\.count/);
 	});
 
+	it("rewrites `in` (binary expressions are visited)", async () => {
+		const out =
+			await compileWithPlugin(`import { observable } from "@sobx/magic";
+export const s = observable({ a: 1 });
+function f(o, k) { return k in o; }
+log("b" in s);`);
+		expect(out).toContain("__sobx_hasProperty(o, k)");
+		expect(out).toContain('__sobx_hasProperty(s, "b")');
+	});
+
 	it("keeps comments around rewritten nodes once", async () => {
 		const out = await compileWithPlugin(`/** header */
 import { observable } from "@sobx/magic";

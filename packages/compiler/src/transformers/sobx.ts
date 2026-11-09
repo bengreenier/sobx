@@ -12,6 +12,7 @@ import {
 import {
 	compileUnit,
 	DEFAULT_MODULE_SPECIFIER,
+	REACT_MODULE,
 	runtimeImport,
 	SobxCompileError,
 } from "../transform.js";
@@ -61,9 +62,10 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 	const stateFor = (code: string, id: string): FileState => {
 		let state = files.get(id);
 		if (state?.code !== code) {
-			const program = code.includes(moduleSpecifier)
-				? babelParse(code, getLang(id), { plugins: [...PARSER_PLUGINS] })
-				: t.program([]);
+			const program =
+				code.includes(moduleSpecifier) || code.includes(REACT_MODULE)
+					? babelParse(code, getLang(id), { plugins: [...PARSER_PLUGINS] })
+					: t.program([]);
 			const unit = compileUnit(program, code, {
 				moduleSpecifier,
 				filename: id,
@@ -93,6 +95,7 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 				t.isAssignmentExpression(node) ||
 				t.isUpdateExpression(node) ||
 				t.isUnaryExpression(node) ||
+				t.isBinaryExpression(node) ||
 				t.isVariableDeclarator(node)
 			);
 		},
