@@ -371,7 +371,7 @@ describe("observable objects", () => {
 		});
 		expect(() => {
 			(o as { x: number }).x = 2;
-		}).toThrow(TypeError);
+		}).toThrow(/not possible to assign a new value to a computed/);
 	});
 
 	it("accept and ignore the proxy option", () => {
@@ -511,7 +511,7 @@ describe("enforceActions", () => {
 		s.a = 2; // observed, outside an action
 		expect(warn).toHaveBeenCalledTimes(1);
 		expect(warn.mock.calls[0]?.[0]).toMatch(
-			/enforceActions is "observed".*: a/,
+			/enforceActions is "observed".*: ObservableObject@\d+\.a/,
 		);
 		action(() => {
 			s.a = 3;
@@ -544,8 +544,8 @@ describe("enforceActions", () => {
 
 	it("warns about unsupported configure options", () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		configure({ computedRequiresReaction: true } as never);
-		expect(warn.mock.calls[0]?.[0]).toMatch(/computedRequiresReaction/);
+		configure({ nonsense: true } as never);
+		expect(warn.mock.calls[0]?.[0]).toMatch(/nonsense/);
 		warn.mockRestore();
 	});
 });

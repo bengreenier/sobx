@@ -8,30 +8,8 @@
  */
 import type * as runtime from "@sobx/runtime";
 
-export type {
-	Annotation,
-	AnnotationsMap,
-	AnnotationValue,
-	ArrayOptions,
-	AutorunOptions,
-	BoxOptions,
-	CancellablePromise,
-	CollectionOptions,
-	Computed,
-	ComputedOptions,
-	ConfigureOptions,
-	Disposer,
-	EnforceActions,
-	FlowPromise,
-	ObservableArray,
-	ObservableBox,
-	ObservableMap,
-	ObservableOptions,
-	ObservableSet,
-	Reaction,
-	ReactionOptions,
-	WhenOptions,
-} from "@sobx/runtime";
+// (Those that are also values, below, take precedence.)
+export type * from "@sobx/runtime";
 
 function notCompiled(name: string): never {
 	throw new Error(
@@ -55,6 +33,7 @@ export const observable: runtime.ObservableFn = placeholder("observable", [
 	"shallow",
 	"struct",
 	"deep",
+	"object",
 	"array",
 	"box",
 	"map",
@@ -98,7 +77,6 @@ export const isAction = placeholder<typeof runtime.isAction>("isAction");
 export const isFlowCancellationError = placeholder<
 	typeof runtime.isFlowCancellationError
 >("isFlowCancellationError");
-/** sobx's explicit API (same names and semantics as MobX's object API functions). */
 export const set = placeholder<typeof runtime.set>("set");
 export const remove = placeholder<typeof runtime.remove>("remove");
 export const has = placeholder<typeof runtime.has>("has");
@@ -106,3 +84,78 @@ export const get = placeholder<typeof runtime.get>("get");
 export const keys = placeholder<typeof runtime.keys>("keys");
 export const values = placeholder<typeof runtime.values>("values");
 export const entries = placeholder<typeof runtime.entries>("entries");
+export const defineProperty =
+	placeholder<typeof runtime.defineProperty>("defineProperty");
+export const ownKeys = placeholder<typeof runtime.ownKeys>("ownKeys");
+export const extendObservable =
+	placeholder<typeof runtime.extendObservable>("extendObservable");
+export const override = placeholder<typeof runtime.override>("override");
+export const observe = placeholder<typeof runtime.observe>("observe");
+export const intercept = placeholder<typeof runtime.intercept>("intercept");
+export const spy = placeholder<typeof runtime.spy>("spy");
+export const trace = placeholder<typeof runtime.trace>("trace");
+export const onReactionError =
+	placeholder<typeof runtime.onReactionError>("onReactionError");
+export const onBecomeObserved =
+	placeholder<typeof runtime.onBecomeObserved>("onBecomeObserved");
+export const onBecomeUnobserved =
+	placeholder<typeof runtime.onBecomeUnobserved>("onBecomeUnobserved");
+export const createAtom = placeholder<typeof runtime.createAtom>("createAtom");
+export const getAtom = placeholder<typeof runtime.getAtom>("getAtom");
+export const getDebugName =
+	placeholder<typeof runtime.getDebugName>("getDebugName");
+export const getDependencyTree =
+	placeholder<typeof runtime.getDependencyTree>("getDependencyTree");
+export const getObserverTree =
+	placeholder<typeof runtime.getObserverTree>("getObserverTree");
+export const isObservableProp =
+	placeholder<typeof runtime.isObservableProp>("isObservableProp");
+export const isComputedProp =
+	placeholder<typeof runtime.isComputedProp>("isComputedProp");
+export const isFlow = placeholder<typeof runtime.isFlow>("isFlow");
+export const flowResult = placeholder<typeof runtime.flowResult>("flowResult");
+export const transaction =
+	placeholder<typeof runtime.transaction>("transaction");
+export const _allowStateChanges =
+	placeholder<typeof runtime._allowStateChanges>("_allowStateChanges");
+export const _allowStateChangesInsideComputed = placeholder<
+	typeof runtime._allowStateChangesInsideComputed
+>("_allowStateChangesInsideComputed");
+export const _allowStateReadsEnd = placeholder<
+	typeof runtime._allowStateReadsEnd
+>("_allowStateReadsEnd");
+export const _allowStateReadsStart = placeholder<
+	typeof runtime._allowStateReadsStart
+>("_allowStateReadsStart");
+export const _autoAction =
+	placeholder<typeof runtime._autoAction>("_autoAction");
+export const _endAction = placeholder<typeof runtime._endAction>("_endAction");
+export const _getAdministration =
+	placeholder<typeof runtime._getAdministration>("_getAdministration");
+export const _getGlobalState =
+	placeholder<typeof runtime._getGlobalState>("_getGlobalState");
+export const _isComputingDerivation = placeholder<
+	typeof runtime._isComputingDerivation
+>("_isComputingDerivation");
+export const _resetGlobalState =
+	placeholder<typeof runtime._resetGlobalState>("_resetGlobalState");
+export const _startAction =
+	placeholder<typeof runtime._startAction>("_startAction");
+/** Where an observable's administration is: rewritten to the runtime's by the compiler. */
+export const $mobx: typeof runtime.$mobx = Symbol(
+	"sobx administration (not compiled)",
+) as never;
+export const ObservableMap =
+	placeholder<typeof runtime.ObservableMap>("ObservableMap");
+// biome-ignore lint/suspicious/noExplicitAny: as in MobX
+export type ObservableMap<K = any, V = any> = runtime.ObservableMap<K, V>;
+export const ObservableSet =
+	placeholder<typeof runtime.ObservableSet>("ObservableSet");
+// biome-ignore lint/suspicious/noExplicitAny: as in MobX
+export type ObservableSet<T = any> = runtime.ObservableSet<T>;
+export const Reaction = placeholder<typeof runtime.Reaction>("Reaction");
+export type Reaction = runtime.Reaction;
+export const FlowCancellationError = placeholder<
+	typeof runtime.FlowCancellationError
+>("FlowCancellationError");
+export type FlowCancellationError = runtime.FlowCancellationError;

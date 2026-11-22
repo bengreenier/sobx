@@ -1,6 +1,7 @@
 import "./proxies.js";
 
 export {
+	defineProperty,
 	deleteProperty,
 	entries,
 	entriesOf,
@@ -10,6 +11,7 @@ export {
 	hasProperty,
 	keys,
 	keysOf,
+	ownKeys,
 	remove,
 	set,
 	setProperty,
@@ -21,6 +23,8 @@ export {
 	type CancellablePromise,
 	FlowCancellationError,
 	type FlowPromise,
+	flowResult,
+	isFlow,
 	isFlowCancellationError,
 	type WhenOptions,
 	when,
@@ -30,18 +34,48 @@ export {
 	type BoxOptions,
 	type CollectionOptions,
 	comparer,
+	type MapEntries,
 	ObservableArray,
-	ObservableBox,
 	ObservableMap,
 	ObservableSet,
 } from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
 export {
+	$mobx,
 	batch,
+	batch as transaction,
 	currentTracking,
+	type Dep as Atom,
 	type EnforceActions,
 	untracked,
 } from "./core.js";
+export {
+	_allowStateChanges,
+	_allowStateChangesInsideComputed,
+	_allowStateReadsEnd,
+	_allowStateReadsStart,
+	_endAction,
+	_getGlobalState,
+	_isComputingDerivation,
+	_resetGlobalState,
+	_startAction,
+	createAtom,
+	type DependencyTree,
+	getAdministration as _getAdministration,
+	getAtom,
+	getDebugName,
+	getDependencyTree,
+	getObserverTree,
+	intercept,
+	isComputedProp,
+	isObservableProp,
+	ObservableValue as ObservableBox,
+	type ObserverTree,
+	observe,
+	onBecomeObserved,
+	onBecomeUnobserved,
+	trace,
+} from "./extras.js";
 export {
 	type AccessorAnnotation,
 	type ActionFn,
@@ -49,19 +83,23 @@ export {
 	type AnnotationsMap,
 	type AnnotationValue,
 	action,
+	autoAction as _autoAction,
 	type ComputedFn,
 	computed,
+	extendObservable,
 	type FlowAnnotation,
 	type FlowFn,
 	flow,
 	type GetterAnnotation,
 	isAction,
+	type LegacyDecorator,
 	type MethodAnnotation,
 	makeAutoObservable,
 	makeObservable,
 	type ObservableFn,
 	type ObservableOptions,
 	observable,
+	override,
 	runInAction,
 } from "./observable.js";
 export {
@@ -71,13 +109,24 @@ export {
 	type ProxyLikeOptions,
 } from "./proxy-like.js";
 export {
+	type AbortSignalLike,
 	type AutorunOptions,
 	autorun,
 	type Disposer,
+	onReactionError,
 	Reaction,
 	type ReactionOptions,
 	reaction,
 } from "./reaction.js";
+export {
+	type ChangeListener,
+	type Interceptor,
+	type Lambda,
+	type SpyEvent,
+	type SpyListener,
+	spy,
+} from "./spy.js";
+export type * from "./types.js";
 export {
 	type ConfigureOptions,
 	configure,

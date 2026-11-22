@@ -22,8 +22,7 @@ import { patch } from "./utils.js";
 
 /** How many derivations observe a box (white-box: checks subscriptions are released). */
 function observers(box: object): number {
-	return (box as unknown as { dep: { observers: Set<unknown> } }).dep.observers
-		.size;
+	return (box as unknown as { observers: Set<unknown> }).observers.size;
 }
 
 describe("observer", () => {

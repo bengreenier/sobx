@@ -1,7 +1,8 @@
-import { currentTracking, Reaction } from "@sobx/runtime";
+import { _allowStateChanges, currentTracking, Reaction } from "@sobx/runtime";
 import { type Component, type ComponentClass, PureComponent } from "react";
 import { observerFinalizationRegistry } from "./finalization.js";
 import { DEV, isUsingStaticRendering } from "./static-rendering.js";
+import { trackRender } from "./use-observer.js";
 import { patch, shallowEqual } from "./utils.js";
 
 const administration = Symbol("sobxObserverAdministration");
@@ -80,7 +81,7 @@ Please use component lifecycle method to copy the value into a local observable 
 }
 
 function createReaction(adm: ClassAdministration): Reaction {
-	return new Reaction(() => {
+	return new Reaction(`${adm.name}.render()`, () => {
 		if (!adm.mounted) {
 			// Re-render on mount instead (componentDidMount runs after the children's, which may
 			// change what this component read).
@@ -224,12 +225,11 @@ function createReactiveRender(
 			}
 		}
 		adm.invalidatedBeforeMount = false;
-		// Errors propagate to React (error boundaries).
-		return adm.reaction.track(() => {
+		return trackRender(adm.reaction, () => {
 			const outer = adm.renderTracking;
 			adm.renderTracking = currentTracking();
 			try {
-				return render();
+				return _allowStateChanges(false, render);
 			} finally {
 				adm.renderTracking = outer;
 			}

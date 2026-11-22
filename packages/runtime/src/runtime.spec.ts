@@ -83,23 +83,29 @@ describe("reaction", () => {
 describe("errors in derivations", () => {
 	/** How many derivations observe a box (white-box). */
 	const observers = (box: object) =>
-		(box as unknown as { dep: { observers: Set<unknown> } }).dep.observers.size;
+		(box as unknown as { observers: Set<unknown> }).observers.size;
 
 	it("a throwing Reaction.track keeps (and later releases) what it read", () => {
 		const a = observable.box(1);
 		const b = observable.box(2);
 		let runs = 0;
-		const r = new Reaction(() => runs++);
-		expect(() =>
-			r.track(() => {
-				a.get();
-				throw new Error("x");
-			}),
-		).toThrow("x");
+		const errors: unknown[] = [];
+		const r = new Reaction(
+			"r",
+			() => runs++,
+			(error) => errors.push(error),
+		);
+		r.track(() => {
+			a.get();
+			throw new Error("x");
+		});
+		expect(errors).toEqual([new Error("x")]);
 		expect(observers(a)).toBe(1);
 		runInAction(() => a.set(3));
 		expect(runs).toBe(1);
-		r.track(() => b.get());
+		r.track(() => {
+			b.get();
+		});
 		expect(observers(a)).toBe(0);
 		expect(observers(b)).toBe(1);
 		r.dispose();
@@ -146,14 +152,15 @@ describe("autorun", () => {
 		error.mockRestore();
 	});
 
-	it("throws when reactions never converge", () => {
+	it("stops (and logs) when reactions never converge, as in MobX", () => {
 		const s = new ProxyLike({ a: 0 });
 		const error = vi.spyOn(console, "error").mockImplementation(() => {});
 		autorun(() => {
 			s.set("a", untracked(() => s.get("a")) + 1);
 			s.get("a");
 		});
-		expect(() => s.set("a", 100)).toThrow(/did not converge/);
+		s.set("a", 100);
+		expect(error.mock.calls[0]?.[0]).toMatch(/doesn't converge/);
 		error.mockRestore();
 	});
 });

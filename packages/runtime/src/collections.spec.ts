@@ -66,7 +66,7 @@ describe("observable maps", () => {
 		m.set("a", 5);
 		expect(a).toHaveBeenCalledTimes(2);
 		m.clear();
-		expect([a, hasB, size].map((f) => f.mock.calls.length)).toEqual([3, 3, 5]);
+		expect([a, hasB, size].map((f) => f.mock.calls.length)).toEqual([3, 3, 4]);
 	});
 
 	it("tracks iteration", () => {

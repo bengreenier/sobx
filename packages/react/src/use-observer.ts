@@ -21,7 +21,7 @@ interface ObserverAdministration {
 }
 
 function createReaction(adm: ObserverAdministration): void {
-	adm.reaction = new Reaction(() => {
+	adm.reaction = new Reaction(`observer${adm.name}`, () => {
 		adm.version++;
 		// Not set before the component mounts: useSyncExternalStore then sees the new version
 		// when it subscribes, and re-renders.
@@ -81,8 +81,27 @@ export function useObserverInternal<T>(render: () => T, name: string): T {
 	useSyncExternalStore(adm.subscribe, adm.getSnapshot, adm.getSnapshot);
 	// biome-ignore-end lint/correctness/useHookAtTopLevel: see above
 
-	// Errors propagate to React (error boundaries); the reaction keeps what was read so far.
-	return (adm.reaction as Reaction).track(render);
+	return trackRender(adm.reaction as Reaction, render);
+}
+
+/**
+ * Track `render` in `reaction`. Errors propagate to React (error boundaries), not to the
+ * reaction's error handling; what was read so far stays tracked.
+ */
+export function trackRender<T>(reaction: Reaction, render: () => T): T {
+	let result: T | undefined;
+	let error: unknown;
+	let failed = false;
+	reaction.track(() => {
+		try {
+			result = render();
+		} catch (e) {
+			failed = true;
+			error = e;
+		}
+	});
+	if (failed) throw error;
+	return result as T;
 }
 
 let warnedUseObserver = false;

@@ -30,7 +30,8 @@
 		"build": "pnpm run build:types && pnpm run build:lib",
 		"build:types": "tsc -p tsconfig.lib.json",
 		"build:lib": "vite build",
-		"lint": "biome check ."
+		"lint": "biome check .",
+		"test": "tsc -p tsconfig.type-tests.json"
 	},
 	"dependencies": {
 		"@sobx/runtime": "workspace:*"

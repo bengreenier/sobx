@@ -491,6 +491,8 @@ export type DiagnosticCode =
 	| "api-not-called"
 	/** An API was called with missing / malformed arguments. */
 	| "invalid-arguments"
+	/** Annotations or options that are not literals, so what they say is not known statically. */
+	| "unresolved-arguments"
 	/** An observable array, box, Map or Set: tracked by the runtime, its reads and writes are not analyzed. */
 	| "opaque-observable"
 	/** `observable(...)` / `computed(...)` result not bound to a simple identifier. */

@@ -222,10 +222,10 @@ describe("action()", () => {
 	it("reports other API members", () => {
 		const mod = analyze(`
 			import { observable } from "@sobx/magic";
-			const a = observable.object({});
+			const a = observable.nope({});
 		`);
 		expect(codes(mod)).toEqual(["unsupported-api"]);
-		expect(mod.diagnostics[0]?.message).toContain("observable.object");
+		expect(mod.diagnostics[0]?.message).toContain("observable.nope");
 	});
 
 	it("accepts comparer anywhere", () => {
@@ -605,9 +605,9 @@ describe("makeObservable / makeAutoObservable", () => {
 			const s4 = makeAutoObservable({ a: 1 }, {}, { name: "ok" });
 		`);
 		expect(codes(mod)).toEqual([
-			"invalid-arguments",
-			"invalid-arguments",
-			"invalid-arguments",
+			"unresolved-arguments",
+			"unresolved-arguments",
+			"unresolved-arguments",
 		]);
 	});
 
@@ -759,20 +759,22 @@ describe("makeObservable / makeAutoObservable", () => {
 					makeObservable(this, {
 						a: computed,
 						m: observable,
+						g: observable,
 						missing: observable,
 						weird: somethingElse,
 					});
 				}
 				m() {}
+				get g() { return 1; }
 				weird = 1;
 			}
 		`);
-		// Sorted by source position: member `a`, the `missing` key, members `m` and `weird`.
+		// Sorted by source position: member `a`, the `missing` key, members `g` and `weird`.
 		expect(codes(mod)).toEqual([
 			"invalid-annotation",
 			"unknown-annotation-key",
 			"invalid-annotation",
-			"invalid-annotation",
+			"unresolved-arguments",
 		]);
 	});
 

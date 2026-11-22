@@ -30,29 +30,74 @@ const MODELED: &[&str] = &[
 const UNMODELED: &[&str] = &[];
 /// Plain values (not calls) that are recognized and allowed anywhere.
 const VALUES: &[&str] = &[
+    "$mobx",
+    "FlowCancellationError",
+    "ObservableMap",
+    "ObservableSet",
+    "Reaction",
+    "_allowStateChanges",
+    "_allowStateChangesInsideComputed",
+    "_allowStateReadsEnd",
+    "_allowStateReadsStart",
+    "_autoAction",
+    "_endAction",
+    "_getAdministration",
+    "_getGlobalState",
+    "_isComputingDerivation",
+    "_resetGlobalState",
+    "_startAction",
     "comparer",
     "configure",
+    "createAtom",
+    "defineProperty",
     "entries",
+    "extendObservable",
+    "flowResult",
     "get",
+    "getAtom",
+    "getDebugName",
+    "getDependencyTree",
+    "getObserverTree",
     "has",
+    "intercept",
     "isAction",
     "isBoxedObservable",
     "isComputed",
+    "isComputedProp",
+    "isFlow",
     "isFlowCancellationError",
     "isObservable",
     "isObservableArray",
     "isObservableMap",
     "isObservableObject",
+    "isObservableProp",
     "isObservableSet",
     "keys",
+    "observe",
+    "onBecomeObserved",
+    "onBecomeUnobserved",
+    "onReactionError",
+    "override",
+    "ownKeys",
     "remove",
     "set",
+    "spy",
     "toJS",
+    "trace",
+    "transaction",
     "untracked",
     "values",
 ];
 /// `observable.<kind>(...)` constructors.
 const OBSERVABLE_VALUES: &[&str] = &["array", "box", "map", "set"];
+/// Other members of the API's functions (annotations, and what is not analyzed): known, and usable
+/// as any value.
+const API_MEMBERS: &[(&str, &[&str])] = &[
+    ("observable", &["ref", "shallow", "struct", "deep", "object"]),
+    ("computed", &["struct"]),
+    ("action", &["bound"]),
+    ("flow", &["bound"]),
+];
 const ANNOTATING: &[&str] = &["observable", "makeObservable", "makeAutoObservable"];
 const OBJECT_ENUMERATORS: &[&str] = &["keys", "values", "entries", "assign", "getOwnPropertyNames", "freeze"];
 const MUTATING_ARRAY_METHODS: &[&str] =
@@ -363,6 +408,10 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                             ModuleExportName::StringLiteral(l) => l.value.display().to_string(),
                         };
                         let api = known_api(&imported);
+                        // Types needn't be imported with `import type`.
+                        if api.is_none() && self.only_types(s.local.symbol_id()) {
+                            continue;
+                        }
                         if api.is_none() {
                             let message =
                                 format!("\"{imported}\" is not a known export of \"{}\".", self.module_specifier);
@@ -383,6 +432,12 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         for (node, api, local) in refs {
             self.classify_api_reference(node, api, &local);
         }
+    }
+
+    /// Whether an import is used, and only as a type.
+    fn only_types(&self, symbol: SymbolId) -> bool {
+        let mut references = self.scoping.get_resolved_references(symbol).peekable();
+        references.peek().is_some() && references.all(|r| r.is_type())
     }
 
     fn classify_api_reference(&mut self, node: NodeId, api: Option<&'static str>, local: &str) {
@@ -437,6 +492,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             return;
         }
         if let Some(member) = member_name {
+            if API_MEMBERS.iter().any(|(a, members)| *a == api && members.contains(&member.as_str())) {
+                return;
+            }
             let s = self.span(expr);
             self.diagnose(
                 "unsupported-api",
@@ -641,7 +699,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         let shape = match object {
             Some(o) => {
                 let raw = self.object_members(o);
-                self.build_shape(&id, source, raw, annotations, options.as_ref(), span)
+                self.build_shape(&id, source, raw, annotations, options.as_ref(), span, false)
             }
             None => Shape::Unknown,
         };
@@ -698,7 +756,10 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             || self.parent(class_id).is_some_and(|p| self.is_export_kind(p));
 
         let raw = self.class_members(class);
-        let shape = self.build_shape(&id, source, raw, annotations, options.as_ref(), span);
+        let shape = {
+            let inherits = class.heritage.is_some();
+            self.build_shape(&id, source, raw, annotations, options.as_ref(), span, inherits)
+        };
         let class_span = self.span(class_id);
         self.classes.insert(class_id, (self.observables.len(), symbol));
         self.class_order.push(class_id);
@@ -976,6 +1037,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         (members, open)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_shape(
         &mut self,
         observable: &str,
@@ -984,8 +1046,9 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         annotations: Option<&'a Argument<'a>>,
         options: Option<&Options>,
         call_span: ir::Span,
+        inherits: bool,
     ) -> Shape {
-        let explicit = annotations.map(|a| self.explicit_annotations(a, source));
+        let explicit = annotations.map(|a| self.explicit_annotations(a, source, observable));
         let use_decorators = source == "decorators" || (source == "makeObservable" && annotations.is_none());
         let defaults = self.inference_defaults(options, observable, call_span);
 
@@ -996,6 +1059,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
 
         if let Some(explicit) = &explicit
             && !open
+            && !inherits
         {
             let mut seen = HashSet::new();
             for (key, _, span) in &explicit.entries {
@@ -1014,7 +1078,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 }
             }
         }
-        if source == "makeObservable" && explicit.is_none() && !members.iter().any(|m| m.annotation.is_some()) {
+        if source == "makeObservable" && explicit.is_none() && !inherits && !members.iter().any(|m| m.annotation.is_some()) {
             self.diagnose(
                 "missing-annotations",
                 "warning",
@@ -1049,7 +1113,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         };
         if unresolved {
             self.diagnose(
-                "invalid-arguments",
+                "unresolved-arguments",
                 "warning",
                 "Options could not be resolved statically; inferred annotations assume `autoBind: false` and `deep: true`.".into(),
                 span,
@@ -1059,15 +1123,15 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         defaults
     }
 
-    fn explicit_annotations(&mut self, arg: &'a Argument<'a>, source: &'static str) -> Explicit {
+    fn explicit_annotations(&mut self, arg: &'a Argument<'a>, source: &'static str, observable: &str) -> Explicit {
         let Argument::ObjectExpression(object) = arg else {
             let s = self.span_of(arg.span());
             self.diagnose(
-                "invalid-arguments",
+                "unresolved-arguments",
                 "error",
                 format!("{source}() annotations must be an object literal to be analyzed."),
                 s,
-                vec![],
+                vec![observable.into()],
             );
             return Explicit { entries: vec![] };
         };
@@ -1092,11 +1156,11 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         if open {
             let s = self.span_of(object.span);
             self.diagnose(
-                "invalid-arguments",
+                "unresolved-arguments",
                 "warning",
                 "Annotations object has spreads or computed keys; annotations may be incomplete.".into(),
                 s,
-                vec![],
+                vec![observable.into()],
             );
         }
         Explicit { entries }
@@ -1116,6 +1180,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 "computed" => Annotation::Computed { modifier: "default" },
                 "action" => Annotation::Action { bound: false },
                 "flow" => Annotation::Flow { bound: false },
+                "_autoAction" => Annotation::AutoAction { bound: false },
                 _ => Annotation::Unknown,
             });
         }
@@ -1226,7 +1291,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
         };
         match annotation {
             Annotation::Observable { .. } => {
-                if m.member_kind != "field" {
+                if m.member_kind == "getter" {
                     invalid(self, format!("\"{}\" is a {}; it cannot be observable.", m.key, m.member_kind));
                 } else if source == "decorators" && !m.accessor {
                     invalid(
@@ -1310,7 +1375,14 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 });
                 member.action = Some(id);
             }
-            Annotation::Unknown => invalid(self, format!("Could not resolve the annotation for \"{}\".", m.key)),
+            // `override`, or a value from elsewhere.
+            Annotation::Unknown => self.diagnose(
+                "unresolved-arguments",
+                "warning",
+                format!("Could not resolve the annotation for \"{}\".", m.key),
+                m.span,
+                vec![observable.into()],
+            ),
             Annotation::Excluded => {}
         }
     }
@@ -1429,6 +1501,10 @@ impl<'s, 'a> Analyzer<'s, 'a> {
     fn visit_computed_call(&mut self, call_id: NodeId) {
         let AstKind::CallExpression(call) = self.kind(call_id) else { return };
         let span = self.span(call_id);
+        // `computed({ ... })`: an annotation with options.
+        if matches!(call.arguments.first(), Some(Argument::ObjectExpression(_))) {
+            return;
+        }
         let Some(body) = call.arguments.first().and_then(|a| a.as_expression()) else {
             self.diagnose("invalid-arguments", "error", "computed() expects a function.".into(), span, vec![]);
             return;
@@ -1495,6 +1571,10 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             Some(Argument::StringLiteral(s)) => Some(s.value.display().to_string()),
             _ => None,
         };
+        // `action("name")`: a named annotation.
+        if name.is_some() && call.arguments.len() == 1 {
+            return;
+        }
         let body_arg = if name.is_some() { call.arguments.get(1) } else { first };
         let Some(body) = body_arg.and_then(|a| a.as_expression()) else {
             let s = self.span(call_id);

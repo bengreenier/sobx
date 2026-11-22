@@ -29,26 +29,29 @@ code imports it.
 
 | API | Supported | Notes |
 |---|---|---|
-| `observable({...}, overrides?, options?)` | Yes | Fast path when local and fully analyzable, otherwise runtime (a `Proxy`). Options: `autoBind`, `deep`, `name`, `proxy` (`false`: no `Proxy` for this object). |
-| `observable([...])`, `observable.array(values?, options?)` | Yes | An `ObservableArray` (a real `Array` subclass). Options: `deep`, `name`. |
-| `observable(new Map())`, `observable.map()`, `observable(new Set())`, `observable.set()` | Yes | Runtime. Options: `deep`, `name`. |
-| `observable.box(value, options?)` | Yes | `get()` / `set()`. Options: `equals`, `deep`, `name`. |
-| `computed(fn, options?)` | Yes | Cached while observed. Options: `equals`, `name`, `keepAlive`. |
-| `reaction(data, effect, options?)` | Yes | Effect gets `(value, previous, reaction)`. Options: `fireImmediately`, `equals`, `name`. |
-| `autorun(fn, options?)` | Yes | Options: `name`. |
-| `when(predicate, effect, options?)`, `when(predicate, options?)` (promise) | Yes | The promise has `cancel()`. Options: `timeout`, `name`. |
-| `action(fn)`, `action(name, fn)`, `runInAction(fn)` | Yes | Batched and untracked. |
-| `flow(function* () {...})` | Yes | Each step between `yield`s runs as an action; the returned promise has `cancel()`. Generator methods are inferred as flows. |
-| `makeObservable(this, annotations, options?)`, `makeAutoObservable(this, overrides?, options?)` | Yes | Runtime. Options: `autoBind`, `deep`. |
-| Annotations: `observable`, `observable.ref` / `.shallow` / `.struct` / `.deep`, `computed`, `computed.struct`, `action`, `action.bound`, `flow`, `flow.bound`, `false`, `true` | Yes | |
+| `observable({...}, overrides?, options?)` | Yes | Fast path when local and fully analyzable, otherwise runtime (a `Proxy`). Options: `autoBind`, `deep`, `defaultDecorator`, `name`, `proxy` (`false`: no `Proxy` for this object). |
+| `observable.object({...}, overrides?, options?)`, `extendObservable(target, {...}, overrides?, options?)` | Yes | Runtime. |
+| `observable([...])`, `observable.array(values?, options?)` | Yes | An `ObservableArray` (a real `Array` subclass), with MobX's `clear`, `replace`, `remove`, `spliceWithArray`. Options: `deep`, `defaultDecorator`, `name`, `proxy`. |
+| `observable(new Map())`, `observable.map()`, `observable(new Set())`, `observable.set()` | Yes | Runtime, with MobX's `merge`, `replace`, `toJSON`... Options: `deep`, `defaultDecorator`, `name`. |
+| `observable.box(value, options?)` | Yes | `get()` / `set()`. Options: `equals`, `deep`, `defaultDecorator`, `name`. |
+| `computed(fn, options?)` | Yes | Cached while observed, and within a batch. Options: `equals`, `name`, `keepAlive`, `set`, `context`, `requiresReaction`. |
+| `reaction(data, effect, options?)` | Yes | Effect gets `(value, previous, reaction)`. Options: `fireImmediately`, `equals`, `name`, `delay`, `scheduler`, `onError`, `requiresObservable`, `signal`. |
+| `autorun(fn, options?)` | Yes | Options: `name`, `delay`, `scheduler`, `onError`, `requiresObservable`, `signal`. |
+| `when(predicate, effect, options?)`, `when(predicate, options?)` (promise) | Yes | The promise has `cancel()`. Options: `timeout`, `name`, `onError`, `signal`. |
+| `action(fn)`, `action(name, fn)`, `runInAction(fn)`, `transaction(fn)` | Yes | Actions are batched and untracked. |
+| `flow(function* () {...})` | Yes | Each step between `yield`s runs as an action; the returned promise has `cancel()`. Async generators too. Generator methods are inferred as flows. `isFlow`, `flowResult`, `FlowCancellationError`. |
+| `makeObservable(this, annotations, options?)`, `makeAutoObservable(this, overrides?, options?)` | Yes | Runtime. Subclasses, `override`. Options: `autoBind`, `deep`, `name`, `defaultDecorator`, `proxy`. |
+| Annotations: `observable`, `observable.ref` / `.shallow` / `.struct` / `.deep`, `computed`, `computed.struct`, `computed({ ... })`, `action`, `action("name")`, `action.bound`, `override`, `flow`, `flow.bound`, `false`, `true` | Yes | |
 | Standard decorators: `@observable accessor x` (and `.ref` / `.shallow` / `.struct` / `.deep`), `@computed get x()`, `@action m()`, `@action.bound m()`, `@flow *m()`, `@flow.bound *m()` | Yes | Your toolchain must transform standard (2022.3) decorators, e.g. esbuild with `target: "es2022"`. |
 | `comparer.default` / `.identity` / `.structural` / `.shallow` | Yes | For `equals` options. |
 | `toJS(value)` | Yes | Deep conversion back to plain arrays, objects, Maps and Sets (computeds and functions are left out; cycles preserved). |
-| `set`, `remove`, `has`, `get`, `keys`, `values`, `entries` | Yes | MobX's object API, for observable objects, arrays, Maps and Sets. |
-| `configure({ enforceActions, useProxies })` | Yes | `useProxies`: `"always"` (default) / `"ifavailable"`, or `"never"` (see [Without proxies](#without-proxies)). Other MobX options are ignored, with a warning in development. |
-| `isObservable`, `isObservableArray`, `isObservableObject`, `isObservableMap`, `isObservableSet`, `isBoxedObservable`, `isComputed`, `isAction`, `isFlowCancellationError`, `untracked` | Yes | |
-| Legacy (`experimentalDecorators`) decorators, `@observable x` without `accessor` | No | Error (`invalid-annotation`). |
-| `extendObservable`, `observe`, `intercept`, `spy`, `trace`, `reaction` options like `delay` / `scheduler` / `onError`, ... | No | Error (`unknown-import` / `unsupported-api` / `unsupported-option`). |
+| `set`, `remove`, `has`, `get`, `keys`, `values`, `entries`, `ownKeys`, `defineProperty` | Yes | MobX's object API, for observable objects, arrays, Maps and Sets. |
+| `configure({...})` | Yes | `enforceActions`, `useProxies` (`"always"` (default) / `"ifavailable"`, or `"never"`, see [Without proxies](#without-proxies)), `computedRequiresReaction`, `reactionRequiresObservable`, `observableRequiresReaction`, `disableErrorBoundaries`, `safeDescriptors`, `reactionScheduler`, `isolateGlobalState`. |
+| `observe`, `intercept`, `onBecomeObserved`, `onBecomeUnobserved`, `onReactionError` | Yes | Also as methods, where MobX has them (`array.observe(...)`, `box.intercept(...)`). |
+| `spy`, `trace`, `getDebugName`, `getDependencyTree`, `getObserverTree`, `getAtom`, `createAtom`, `Reaction`, `$mobx` | Yes | `spy` is for development builds, as in MobX. |
+| `isObservable`, `isObservableArray`, `isObservableObject`, `isObservableMap`, `isObservableSet`, `isBoxedObservable`, `isObservableProp`, `isComputed`, `isComputedProp`, `isAction`, `isFlowCancellationError`, `untracked` | Yes | |
+| Legacy (`experimentalDecorators`) decorators: `@observable x`, `@computed get x()`, `@action m()`, `@action("name")`, `@flow *m()`, `@override`... | Yes | With `makeObservable(this)` in the constructor, as in MobX. Without it: error (`invalid-annotation`). With either setting of `useDefineForClassFields`. |
+| `_allowStateChanges`, `_autoAction`, `_startAction`, ... (MobX's exports for other libraries) | Yes | Except `_interceptReads`: error (`unknown-import`). |
 
 ## React
 
@@ -103,7 +106,7 @@ For a local `const s = observable({...})`:
 | `delete s.a` | Fast path: `s.delete("a")` |
 | `const { a, b: x = 1 } = s`, `({ a } = s)` | Fast path: `= { a: s.get("a"), b: s.get("b") }` |
 | `s.method()`, `s.method?.()` | Fast path: `s.get("method").call(s)`; `this.x` inside the method is compiled too. Methods are batched. |
-| Getters (`get total() {...}`) | Fast path: run with the `ProxyLike` as `this` (tracked, not cached). |
+| Getters (`get total() {...}`) | Fast path: computeds, run with the `ProxyLike` as `this`. |
 | Nested values (`s.user.name = "x"`, `s.items.push(1)`) | Fast path for `s`; the nested values are deep observables. |
 | Exported, passed to a function, aliased (`const t = s`), returned, spread, `Object.keys(s)`, `"a" in s`, dynamic keys (`s[k]`), writes in destructuring patterns, `observable()` not stored in a variable, reassigned bindings | Runtime (with the property operations above compiled to runtime calls) |
 | Setters, `observable.ref` / `.shallow` / `.struct` / bound / excluded members, annotation overrides, options | Runtime |
@@ -133,8 +136,8 @@ created; everywhere else, use `set`, `remove`, `has`, `get`, `keys`, `array.set(
 | Changing observed observables outside actions | Warning at runtime in development builds, as in MobX (`configure({ enforceActions })`: `"observed"` by default, `"always"`, `"never"`). Reactions and effects may change state. |
 | Writes inside a reaction's data function, autorun or computed | Warning (`write-in-derivation`). |
 | Accesses after `await` in an action or tracked function | Warning (`after-await`): they run outside the action / tracking, as in MobX. |
-| A reaction that keeps changing what it depends on | Throws after 100 iterations. |
-| Errors thrown in reactions | Logged with `console.error`; other reactions keep running. |
+| A reaction that keeps changing what it depends on | Stopped after 100 iterations, with `console.error`, as in MobX. |
+| Errors thrown in reactions | Logged with `console.error` (or given to `onError` / `onReactionError`); other reactions keep running. |
 | Errors thrown in computeds | Cached and rethrown to every reader, as in MobX; readers still depend on the computed and on what it read before throwing. |
 
 ## Differences from MobX
@@ -143,11 +146,15 @@ The runtime and the compiler are tested against MobX itself:
 
 - `packages/runtime/src/plain-js.spec.ts` runs plain JavaScript (24 ways of reading and 10 ways of
   writing a key that doesn't exist yet, array operations, `this`, identity...) as is against `mobx`
-  and `@sobx/runtime`; `parity.spec.ts` covers the API.
+  and `@sobx/runtime`; `parity.spec.ts` covers the API, and `features.spec.ts` its less common
+  parts (change objects, spy events, names, order of notifications, which warnings...).
+  `completeness.spec.ts` checks that every MobX export, and every public member of what they
+  return, exists.
 - `packages/compiler/src/values.spec.ts` runs the same source as is against MobX and compiled
   against sobx, for the same patterns and six ways of reaching the observable (directly, as a
   parameter, through an alias, nested, in a plain local, as a class field); `compile.spec.ts`
-  covers the API.
+  covers the API. `mobx-api.spec.ts` checks that every MobX export can be imported from
+  `@sobx/magic`, and that valid MobX code using them compiles without errors and behaves the same.
 
 They compare what is logged, including how often reactions run. Known differences:
 
@@ -158,14 +165,13 @@ They compare what is logged, including how often reactions run. Known difference
   tracking of individual array indexes.
 - `when` without an effect rejects with `Error("WHEN_TIMEOUT")` / `Error("WHEN_CANCELLED")`;
   a cancelled flow rejects with a `FlowCancellationError` (`isFlowCancellationError(e)`).
-- Getters on fast-path objects are not cached (they are re-run when read); computeds created
-  with `computed()`, `observable()` (runtime), `makeObservable` / `makeAutoObservable` or
-  `@computed` are cached.
-- `autoAction` members are batched but not untracked.
-- Development checks other than `enforceActions` (`computedRequiresReaction`,
-  `observableRequiresReaction`, ...) are not implemented.
-- Not implemented: `extendObservable`, `observe` / `intercept`, `spy` / `trace`, `onBecomeObserved`,
-  reaction schedulers / `delay`, legacy decorators.
+- `_interceptReads` is not implemented (MobX's undocumented hook to change the values read).
+- Messages of errors and warnings are worded differently.
+- Each copy of the runtime has its own state (as with MobX's `isolateGlobalState`, which is accepted
+  but does nothing more).
+- The results of `ObservableSet`'s `union`, `intersection`... are in JavaScript's order.
+- Spies see a computed's first value as a change from `undefined`, and an error thrown by a
+  computed as the error itself (MobX passes internal objects).
 - React: [`@sobx/react`](../packages/react) has mobx-react's API; `observerBatching` does
   nothing (React 18+ batches updates itself).
 - Plain object literals from another realm (an iframe, `node:vm`) are accepted by `observable()`,

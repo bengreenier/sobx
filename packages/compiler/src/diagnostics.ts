@@ -48,6 +48,7 @@ export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 		// Handled by the runtime.
 		"namespace-import": "info",
 		"api-not-called": "info",
+		"unresolved-arguments": "info",
 		"unbound-observable": "info",
 		"observable-escape": "info",
 		"dynamic-key": "info",
@@ -65,15 +66,39 @@ export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 
 /** Options the runtime implements, per API. */
 const SUPPORTED_OPTIONS = {
-	reaction: ["fireImmediately", "equals", "name"],
-	autorun: ["name"],
-	when: ["timeout", "name"],
-	computed: ["equals", "name", "keepAlive"],
-	observable: ["autoBind", "deep", "name", "proxy"],
-	"observable.array": ["deep", "name"],
-	"observable.box": ["equals", "deep", "name"],
-	"observable.map": ["deep", "name"],
-	"observable.set": ["deep", "name"],
+	reaction: [
+		"fireImmediately",
+		"equals",
+		"name",
+		"delay",
+		"scheduler",
+		"onError",
+		"requiresObservable",
+		"signal",
+	],
+	autorun: [
+		"name",
+		"delay",
+		"scheduler",
+		"onError",
+		"requiresObservable",
+		"signal",
+	],
+	when: ["timeout", "name", "onError", "signal"],
+	computed: [
+		"equals",
+		"name",
+		"keepAlive",
+		"set",
+		"get",
+		"context",
+		"requiresReaction",
+	],
+	observable: ["autoBind", "deep", "name", "proxy", "defaultDecorator"],
+	"observable.array": ["deep", "name", "proxy", "defaultDecorator"],
+	"observable.box": ["equals", "deep", "name", "defaultDecorator"],
+	"observable.map": ["deep", "name", "defaultDecorator"],
+	"observable.set": ["deep", "name", "defaultDecorator"],
 } as const;
 
 /** The compile diagnostics for a module: the analyzer's, re-graded, plus the compiler's own. */

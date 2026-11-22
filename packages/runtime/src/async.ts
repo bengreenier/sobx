@@ -1,12 +1,17 @@
 /** `when` and `flow`. */
-import { runAction } from "./core.js";
-import { type Disposer, Reaction, runAsAction } from "./reaction.js";
+import { createAction, executeAction } from "./action.js";
+import { $mobx, allowStateChanges, debugName } from "./core.js";
+import { type AbortSignalLike, autorun, type Disposer } from "./reaction.js";
 
 export interface WhenOptions {
-	/** Reject the promise form (or dispose the effect form) after this many milliseconds. */
+	/** Reject the promise form (or fail the effect form) after this many milliseconds. */
 	timeout?: number;
-	/** For debugging; not used. */
+	/** Called with errors (including the timeout), in the effect form. */
+	onError?: (error: unknown) => void;
+	/** For debugging. */
 	name?: string;
+	/** Stops waiting when aborted (the promise form rejects). */
+	signal?: AbortSignalLike;
 }
 
 /** The promise returned by `when(predicate)`, with `cancel()`. */
@@ -19,8 +24,8 @@ declare function setTimeout(fn: () => void, ms: number): unknown;
 declare function clearTimeout(handle: unknown): void;
 
 /**
- * `when(predicate, effect, options?)`: once `predicate` returns true, run `effect` (untracked,
- * batched) and stop. Returns a disposer.
+ * `when(predicate, effect, options?)`: once `predicate` returns true, run `effect` (as an action)
+ * and stop. Returns a disposer.
  *
  * `when(predicate, options?)`: a promise that resolves once `predicate` returns true; it has
  * `cancel()`, and rejects after `options.timeout` milliseconds.
@@ -40,56 +45,76 @@ export function when(
 	third?: WhenOptions,
 ): Disposer | CancellablePromise<void> {
 	if (typeof second === "function") {
-		return whenEffect(predicate, second, third ?? {}).dispose;
+		return whenEffect(predicate, second, third ?? {});
 	}
-	const options = second ?? {};
-	let cancel: () => void = () => {};
-	const promise = new Promise<void>((resolve, reject) => {
-		const { dispose } = whenEffect(predicate, resolve, options, (error) => {
-			reject(error);
-		});
-		cancel = () => {
-			dispose();
-			reject(new Error("WHEN_CANCELLED"));
-		};
-	}) as CancellablePromise<void>;
-	promise.cancel = () => cancel();
-	return promise;
+	return whenPromise(predicate, second ?? {});
 }
 
 function whenEffect(
 	predicate: () => boolean,
 	effect: () => void,
 	options: WhenOptions,
-	onTimeout?: (error: Error) => void,
-): { dispose: Disposer } {
-	let done = false;
+): Disposer {
 	let timer: unknown;
-	const r = new Reaction((self) => {
-		if (done) return;
-		if (!self.track(predicate)) return;
-		done = true;
-		if (timer !== undefined) clearTimeout(timer);
-		self.dispose();
-		runAsAction(effect);
-	});
-	const dispose = (() => {
-		done = true;
-		if (timer !== undefined) clearTimeout(timer);
-		r.dispose();
-	}) as Disposer;
-	dispose.$reaction = r;
-	if (options.timeout !== undefined) {
+	if (typeof options.timeout === "number") {
+		const error = new Error("WHEN_TIMEOUT");
 		timer = setTimeout(() => {
-			if (done) return;
-			dispose();
-			const error = new Error("WHEN_TIMEOUT");
-			if (onTimeout) onTimeout(error);
+			if (disposer[$mobx].isDisposed) return;
+			disposer();
+			if (options.onError) options.onError(error);
 			else throw error;
 		}, options.timeout);
 	}
-	r.execute();
-	return { dispose };
+	const name = options.name ?? debugName("When");
+	const run = createAction(`${name}-effect`, effect);
+	const disposer = autorun(
+		(r) => {
+			if (!allowStateChanges(false, predicate)) return;
+			r.dispose();
+			if (timer !== undefined) clearTimeout(timer);
+			run();
+		},
+		{ name, onError: options.onError, signal: options.signal },
+	);
+	return disposer;
+}
+
+function whenPromise(
+	predicate: () => boolean,
+	options: WhenOptions,
+): CancellablePromise<void> {
+	if (options.onError) {
+		throw new Error(
+			"sobx: the options 'onError' and 'promise' cannot be combined",
+		);
+	}
+	const { signal } = options;
+	if (signal?.aborted) {
+		return Object.assign(Promise.reject(new Error("WHEN_ABORTED")), {
+			cancel: () => {},
+		});
+	}
+	let cancel: () => void = () => {};
+	let abort: () => void = () => {};
+	const promise = new Promise<void>((resolve, reject) => {
+		const disposer = whenEffect(predicate, resolve as () => void, {
+			...options,
+			onError: reject,
+		});
+		cancel = () => {
+			disposer();
+			reject(new Error("WHEN_CANCELLED"));
+		};
+		abort = () => {
+			disposer();
+			reject(new Error("WHEN_ABORTED"));
+		};
+		signal?.addEventListener?.("abort", abort);
+	}).finally(() =>
+		signal?.removeEventListener?.("abort", abort),
+	) as CancellablePromise<void>;
+	promise.cancel = cancel;
+	return promise;
 }
 
 /** The promise returned by a flow, with `cancel()`. */
@@ -101,17 +126,40 @@ export class FlowCancellationError extends Error {
 		super("FLOW_CANCELLED");
 		this.name = "FlowCancellationError";
 	}
+
+	override toString(): string {
+		return `Error: ${this.message}`;
+	}
 }
 
 export function isFlowCancellationError(error: unknown): boolean {
 	return error instanceof FlowCancellationError;
 }
 
-type AnyGenerator = Generator<unknown, unknown, unknown>;
+/** For typing the promise a flow returns: returns its argument. */
+export function flowResult<T>(
+	result: T,
+): T extends Generator<unknown, infer R, unknown> ? FlowPromise<R> : T {
+	return result as never;
+}
 
-/** Run one generator step as an action (batched, untracked). */
-function step(fn: () => IteratorResult<unknown, unknown>) {
-	return runAction(fn);
+/** Whether `fn` was created by `flow()` / a flow annotation. */
+export function isFlow(fn: unknown): boolean {
+	return (
+		(fn as { isMobXFlow?: boolean } | null | undefined)?.isMobXFlow === true
+	);
+}
+
+type AnyGenerator = Generator<unknown, unknown, unknown>;
+type Step = IteratorResult<unknown, unknown>;
+
+let flowId = 0;
+
+const noop = () => {};
+
+function cancelPromise(promise: unknown): void {
+	const { cancel } = promise as { cancel?: unknown };
+	if (typeof cancel === "function") cancel.call(promise);
 }
 
 /**
@@ -121,46 +169,81 @@ function step(fn: () => IteratorResult<unknown, unknown>) {
  */
 export function createFlow<A extends unknown[], R>(
 	generator: (...args: A) => Generator<unknown, R, unknown>,
+	label = generator.name || "<unnamed flow>",
 ): (...args: A) => FlowPromise<R> {
-	return function (this: unknown, ...args: A): FlowPromise<R> {
-		const gen = generator.apply(this, args) as AnyGenerator;
-		let rejectFlow: (error: unknown) => void = () => {};
-		let finished = false;
+	const wrapped = function (this: unknown, ...args: A): FlowPromise<R> {
+		const id = ++flowId;
+		const step = (what: string, fn: () => Step): Step =>
+			executeAction(`${label} - runid: ${id} - ${what}`, false, fn as never);
+		const gen = createAction(
+			`${label} - runid: ${id} - init`,
+			generator as never,
+		).apply(this, args as never) as AnyGenerator;
+		let rejectFlow: (error: unknown) => void = noop;
+		let pending: Promise<unknown> | undefined;
+		let yielded: unknown;
 		const promise = new Promise<R>((resolve, reject) => {
+			let count = 0;
 			rejectFlow = reject;
-			const advance = (method: "next" | "throw", value: unknown): void => {
-				if (finished) return;
-				let result: IteratorResult<unknown, unknown>;
+			const onFulfilled = (value: unknown): void => {
+				pending = undefined;
+				let result: Step;
 				try {
-					result = step(() =>
-						method === "next" ? gen.next(value) : gen.throw(value),
-					);
+					result = step(`yield ${count++}`, () => gen.next(value));
 				} catch (error) {
-					finished = true;
 					reject(error);
 					return;
 				}
+				next(result);
+			};
+			const onRejected = (error: unknown): void => {
+				pending = undefined;
+				let result: Step;
+				try {
+					result = step(`yield ${count++}`, () => gen.throw(error));
+				} catch (e) {
+					reject(e);
+					return;
+				}
+				next(result);
+			};
+			const next = (result: Step): void => {
+				const { then } = result as unknown as { then?: unknown };
+				if (typeof then === "function") {
+					// An async generator.
+					then.call(result, next, reject);
+					return;
+				}
 				if (result.done) {
-					finished = true;
 					resolve(result.value as R);
 					return;
 				}
-				Promise.resolve(result.value).then(
-					(v) => advance("next", v),
-					(e) => advance("throw", e),
-				);
+				pending = Promise.resolve(result.value);
+				// Keep what was yielded, for cancel().
+				yielded = result.value;
+				pending.then(onFulfilled, onRejected);
 			};
-			advance("next", undefined);
+			onFulfilled(undefined);
 		}) as FlowPromise<R>;
-		promise.cancel = () => {
-			if (finished) return;
-			finished = true;
+		promise.cancel = createAction(`${label} - runid: ${id} - cancel`, () => {
 			try {
-				step(() => gen.return(undefined));
-			} finally {
+				if (pending) cancelPromise(yielded ?? pending);
+				// Finally blocks may yield something more to cancel.
+				const result = gen.return(undefined) as Step;
+				const last = Promise.resolve(result.value);
+				last.then(noop, noop);
+				pending = last;
+				cancelPromise(result.value ?? last);
 				rejectFlow(new FlowCancellationError());
+			} catch (error) {
+				rejectFlow(error);
 			}
-		};
+		});
 		return promise;
 	};
+	Object.defineProperties(wrapped, {
+		isMobXFlow: { value: true },
+		name: { value: label, configurable: true },
+	});
+	return wrapped;
 }

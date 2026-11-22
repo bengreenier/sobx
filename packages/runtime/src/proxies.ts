@@ -1,80 +1,58 @@
 /**
  * Observable objects and arrays are behind a `Proxy`, as in MobX, so that any code (compiled or
- * not) observes everything on them. Existing keys go through the observable's accessors, and
- * array methods run on the array itself; the traps handle what accessors can't observe. Traps
- * get the observable itself as `target`, and the runtime only works on that, so a trap only ever
- * runs for user code.
+ * not) observes everything on them. Observable properties are read straight from the object's
+ * administration, and array methods run on the array itself; the traps do the rest. Traps get the
+ * observable itself as `target`, and the runtime only works on that, so a trap only ever runs for
+ * user code.
  */
-import { deleteProperty } from "./api.js";
 import {
+	type ArrayAdministration,
+	arrayAdministrationOf,
 	isIndexKey,
 	type ObservableArray,
 	observeRawArray,
 } from "./collections.js";
-import { endBatch, globalState, hooks, proxyOf, startBatch } from "./core.js";
-import { addObservableProperty, administrationOf } from "./observable.js";
-import type { ProxyLike } from "./proxy-like.js";
+import { $mobx, globalState, hooks, proxyOf } from "./core.js";
+import type { ObjectAdministration } from "./object.js";
 
 type AnyRecord = Record<PropertyKey, unknown>;
 
-const admOf = (target: object) =>
-	administrationOf(target) as ProxyLike<AnyRecord>;
+const admOf = (target: AnyRecord) =>
+	(target as unknown as { [$mobx]: ObjectAdministration })[$mobx];
 
 const objectHandler: ProxyHandler<AnyRecord> = {
 	get(target, key, receiver) {
-		// Observable properties: straight from the store (as their accessors do).
 		const adm = admOf(target);
-		if (typeof key === "string" && adm.owns(key)) return adm.read(key);
-		const value = Reflect.get(target, key, receiver);
-		if (value !== undefined || typeof key === "symbol" || key in target) {
-			return value;
-		}
-		// Tracked: the key may be added later.
-		return globalState.tracking === null ? undefined : adm.get(key);
+		const observable = adm.values.get(key);
+		if (observable !== undefined) return observable.get();
+		// Tracked if the key doesn't exist: it may be added later.
+		if (globalState.tracking !== null && !(key in target)) adm.has(key);
+		return Reflect.get(target, key, receiver);
 	},
 	set(target, key, value, receiver) {
-		if (typeof key === "symbol" || Object.hasOwn(target, key)) {
-			target[key] = value; // the accessor
-			return true;
-		}
 		// Inherited from an object whose prototype is the observable: not ours.
-		if (receiver !== proxyOf(target)) {
+		if (receiver !== proxyOf(target) && !Object.hasOwn(target, key)) {
 			return Reflect.set(target, key, value, receiver);
 		}
-		addObservableProperty(target, key, value);
-		return true;
+		// An interceptor refusing isn't an error.
+		return admOf(target).set(key, value, true) ?? true;
 	},
 	deleteProperty(target, key) {
-		if (typeof key === "symbol" || !Object.hasOwn(target, key)) {
-			return Reflect.deleteProperty(target, key);
-		}
-		return deleteProperty(target, key);
+		return admOf(target).delete(key, true) ?? true;
 	},
 	has(target, key) {
-		if (globalState.tracking !== null && typeof key !== "symbol") {
-			admOf(target).has(key);
-		}
-		return key in target;
+		return admOf(target).has(key);
 	},
 	ownKeys(target) {
-		admOf(target).observeKeys();
-		return Reflect.ownKeys(target);
+		return admOf(target).ownKeys() as Array<string | symbol>;
 	},
 	defineProperty(target, key, descriptor) {
-		if (typeof key === "symbol") {
-			return Reflect.defineProperty(target, key, descriptor);
-		}
-		// Replaces an observable property with a plain one, as in MobX.
-		const adm = admOf(target);
-		startBatch();
-		try {
-			if (adm.owns(key)) adm.delete(key);
-			const defined = Reflect.defineProperty(target, key, descriptor);
-			adm.keyRedefined(key);
-			return defined;
-		} finally {
-			endBatch();
-		}
+		return admOf(target).defineProperty(key, descriptor, true) ?? true;
+	},
+	preventExtensions() {
+		throw new Error(
+			"sobx: Dynamic observable objects cannot be frozen. If you're passing observables to 3rd party component/function that calls Object.freeze, pass copy instead: toJS(observable)",
+		);
 	},
 };
 
@@ -91,15 +69,16 @@ const arrayHandler: ProxyHandler<ObservableArray<unknown>> = {
 	},
 	set(target, key, value) {
 		if (isArrayKey(key)) {
-			if (key === "length") target.setLength(Number(value));
-			else target.set(Number(key), value);
+			const adm = arrayAdministrationOf(target) as ArrayAdministration;
+			if (key === "length") adm.setLength(value);
+			else adm.set(Number(key), value);
 			return true;
 		}
 		return Reflect.set(target, key, value, target);
 	},
 	deleteProperty(target, key) {
 		return isArrayKey(key)
-			? deleteProperty(target, key)
+			? target.deleteIndex(Number(key))
 			: Reflect.deleteProperty(target, key);
 	},
 	has(target, key) {
@@ -114,6 +93,11 @@ const arrayHandler: ProxyHandler<ObservableArray<unknown>> = {
 		return isArrayKey(key)
 			? target.defineKey(key, descriptor)
 			: Reflect.defineProperty(target, key, descriptor);
+	},
+	preventExtensions() {
+		throw new Error(
+			"sobx: Observable arrays cannot be frozen. If you're passing observables to 3rd party component/function that calls Object.freeze, pass copy instead: toJS(observable)",
+		);
 	},
 };
 

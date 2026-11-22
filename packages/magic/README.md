@@ -10,7 +10,7 @@ Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to you
 
 Local observable objects whose every use the compiler can see are compiled to direct `get` / `set` calls, with no `Proxy`. Every other observable object or array is behind a `Proxy`, as in MobX, so any code using it is observed, compiled or not. `configure({ useProxies: "never" })` turns proxies off (see [what's supported](../../docs/support.md#without-proxies)).
 
-A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
+Everything MobX 6 exports is implemented, except `_interceptReads` (an undocumented hook). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). See [what's supported, and the differences](../../docs/support.md) for the full list.
 
 ## Install
 

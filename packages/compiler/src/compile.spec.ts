@@ -570,7 +570,7 @@ s.p = { x: 2 };`),
 	it("unsupported options are still errors", () => {
 		expect(
 			codes(
-				`const s = observable({ a: 1 }); when(() => s.a, () => {}, { onError: () => {} });`,
+				`const s = observable({ a: 1 }); when(() => s.a, () => {}, { nope: () => {} });`,
 			),
 		).toContainEqual(["unsupported-option", "error"]);
 	});
@@ -578,19 +578,19 @@ s.p = { x: 2 };`),
 
 describe("diagnostics", () => {
 	it("reports what the runtime can't do as errors", () => {
-		expect(codes(`const o = observable.object({});`)).toContainEqual([
+		expect(codes(`const o = observable.nope({});`)).toContainEqual([
 			"unsupported-api",
 			"error",
 		]);
 		expect(
 			codes(
-				`const s = observable({ a: 1 }); reaction(() => s.a, () => {}, { delay: 10 });`,
+				`const s = observable({ a: 1 }); reaction(() => s.a, () => {}, { nope: 10 });`,
 			),
 		).toContainEqual(["unsupported-option", "error"]);
 	});
 
 	it("reports unknown imports as errors", () => {
-		const source = `import { extendObservable } from "@sobx/magic";`;
+		const source = `import { nope } from "@sobx/magic";`;
 		const ast = parse(source, { sourceType: "module" });
 		expect(
 			transformSobx(ast.program, source).diagnostics.map((d) => [
@@ -690,7 +690,7 @@ class Store {
 	it("fails on errors and logs warnings", async () => {
 		await expect(
 			compileWithPlugin(`import { observable } from "@sobx/magic";
-const o = observable.object({});`),
+const o = observable.nope({});`),
 		).rejects.toThrow(/unsupported-api/);
 		const warnings: string[] = [];
 		await compileWithPlugin(

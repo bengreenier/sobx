@@ -100,6 +100,8 @@ const FALLBACK_CODES = new Set([
 	"dynamic-key",
 	"unsupported-operation",
 	"observable-reassigned",
+	// What they say decides how properties behave.
+	"unresolved-arguments",
 ]);
 
 /**

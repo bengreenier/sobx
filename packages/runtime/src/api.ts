@@ -1,25 +1,22 @@
 /**
- * sobx's explicit API for observables (`set`, `remove`, `has`, `get`, `keys`, `values`,
- * `entries`; same names and semantics as MobX's object API functions), and the lenient helpers
- * the compiler emits for property operations it rewrites (`getProperty`, `setProperty`, ...).
+ * MobX's object API (`set`, `remove`, `has`, `get`, `keys`, `values`, `entries`, `ownKeys`,
+ * `defineProperty`), and the lenient helpers the compiler emits for property operations on
+ * observables it sees (`getProperty`, `setProperty`, ...).
  *
  * Observables are normally behind a `Proxy`, which makes plain JavaScript (adding or deleting
  * keys, `in`, `Object.keys`, array index / `length`...) observed; these functions do the same
  * without one. They always work on the observable behind the proxy.
  */
 import {
+	arrayAdministrationOf,
 	isIndexKey,
 	ObservableArray,
 	ObservableMap,
 	ObservableSet,
-	observeArray,
+	observeRawArray,
 } from "./collections.js";
 import { endBatch, rawOf, startBatch } from "./core.js";
-import {
-	addObservableProperty,
-	administrationOf,
-	removeObservableProperty,
-} from "./observable.js";
+import { administrationOf } from "./object.js";
 import { ProxyLike } from "./proxy-like.js";
 
 type AnyRecord = Record<PropertyKey, unknown>;
@@ -71,19 +68,15 @@ export function set(...args: [unknown, unknown, unknown?]): void {
 	} else if (target instanceof ObservableArray) {
 		const i = index(key);
 		if (!(i >= 0)) throw new RangeError(`sobx: invalid index ${String(key)}.`);
+		// As in MobX: grow first, then assign.
+		if (i >= target.length) target.setLength(i + 1);
 		target.set(i, value);
 	} else if (target instanceof ProxyLike) {
 		(target as ProxyLike<AnyRecord>).set(key as PropertyKey, value);
-	} else if (
-		typeof target === "object" &&
-		target !== null &&
-		administrationOf(target)
-	) {
-		if ((key as PropertyKey) in target)
-			(target as AnyRecord)[key as PropertyKey] = value;
-		else addObservableProperty(target, key as PropertyKey, value);
 	} else {
-		fail("set", target);
+		const adm = administrationOf(target);
+		if (!adm) fail("set", target);
+		adm.set(key as PropertyKey, value);
 	}
 }
 
@@ -96,12 +89,10 @@ export function remove(target: object, key: unknown): void {
 		target.splice(index(key), 1);
 	} else if (target instanceof ProxyLike) {
 		(target as ProxyLike<AnyRecord>).delete(key as PropertyKey);
-	} else if (administrationOf(target)) {
-		if (Object.hasOwn(target, key as PropertyKey)) {
-			removeObservableProperty(target, key as PropertyKey);
-		}
 	} else {
-		fail("remove", target);
+		const adm = administrationOf(target);
+		if (!adm) fail("remove", target);
+		adm.delete(key as PropertyKey);
 	}
 }
 
@@ -112,7 +103,7 @@ export function has(target: object, key: unknown): boolean {
 		return target.has(key);
 	}
 	if (target instanceof ObservableArray) {
-		observeArray(target);
+		observeRawArray(target);
 		const i = index(key);
 		return i >= 0 && i < target.length;
 	}
@@ -121,9 +112,7 @@ export function has(target: object, key: unknown): boolean {
 	}
 	const adm = administrationOf(target);
 	if (!adm) fail("has", target);
-	return (
-		adm.has(key as PropertyKey) || Object.hasOwn(target, key as PropertyKey)
-	);
+	return adm.has(key as PropertyKey);
 }
 
 /** Read `key` of an observable object / Map, or `index` of an array. Tracked, including keys that don't exist yet. */
@@ -138,12 +127,10 @@ export function get(target: object, key: unknown): unknown {
 	}
 	const adm = administrationOf(target);
 	if (!adm) fail("get", target);
-	if ((key as PropertyKey) in target)
-		return (target as AnyRecord)[key as PropertyKey];
 	return adm.get(key as PropertyKey);
 }
 
-/** The keys of an observable object (its observable properties), Map or Set, or an array's indexes. Tracked. */
+/** The keys of an observable object (its enumerable properties), Map or Set, or an array's indexes. Tracked. */
 export function keys(target: object): unknown[] {
 	target = rawOf(target);
 	if (target instanceof ObservableMap || target instanceof ObservableSet) {
@@ -155,6 +142,24 @@ export function keys(target: object): unknown[] {
 	const adm = administrationOf(target);
 	if (!adm) fail("keys", target);
 	return adm.keys();
+}
+
+/** Every own key of an observable object, including symbols and non-enumerable ones. Tracked. */
+export function ownKeys(target: object): PropertyKey[] {
+	const adm = administrationOf(rawOf(target));
+	if (!adm) fail("ownKeys", target);
+	return adm.ownKeys();
+}
+
+/** `Object.defineProperty` on an observable object (the property isn't observable itself). */
+export function defineProperty(
+	target: object,
+	key: PropertyKey,
+	descriptor: PropertyDescriptor,
+): boolean | null {
+	const adm = administrationOf(rawOf(target));
+	if (!adm) fail("defineProperty", target);
+	return adm.defineProperty(key, descriptor);
 }
 
 /** The values of an observable object, Map, Set or array. Tracked. */
@@ -179,39 +184,33 @@ export function entries(target: object): Array<[unknown, unknown]> {
 // Emitted by @sobx/compiler for property operations on values it knows may be observable. They
 // fall back to the plain JavaScript operation for anything else.
 
-const isObservableObjectLike = (target: unknown): target is object =>
-	typeof target === "object" &&
-	target !== null &&
-	(target instanceof ProxyLike || administrationOf(target) !== undefined);
-
 /** `target[key]`, tracked for observable arrays (index / `length`) and missing keys of observable objects. */
 export function getProperty(target: unknown, key: PropertyKey): unknown {
 	const raw = rawOf(target);
 	if (raw instanceof ObservableArray) {
-		if (key === "length") {
-			observeArray(raw);
-			return raw.length;
+		if (key === "length" || isIndexKey(key)) {
+			observeRawArray(raw);
+			return raw[key as never];
 		}
-		return isIndexKey(key) ? raw.get(index(key)) : raw[key as never];
+		return (target as AnyRecord)[key];
 	}
-	if (isObservableObjectLike(raw)) return get(raw, key);
-	return (raw as AnyRecord)[key];
+	const adm = administrationOf(raw);
+	if (adm && !adm.values.has(key)) adm.get(key);
+	return (target as AnyRecord)[key];
 }
 
 /** `target[key] = value`, observed for observable arrays and objects (adding new keys). */
 export function setProperty<V>(target: unknown, key: PropertyKey, value: V): V {
 	const raw = rawOf(target);
-	if (raw instanceof ObservableArray) {
-		if (key === "length") raw.setLength(Number(value));
-		else if (isIndexKey(key)) raw.set(index(key), value);
-		else (raw as unknown as AnyRecord)[key] = value;
+	const array = arrayAdministrationOf(raw);
+	if (array && (key === "length" || isIndexKey(key))) {
+		if (key === "length") array.setLength(value as number);
+		else array.set(index(key), value);
 		return value;
 	}
-	if (isObservableObjectLike(raw)) {
-		set(raw, key, value);
-		return value;
-	}
-	(raw as AnyRecord)[key] = value;
+	const adm = administrationOf(raw);
+	if (adm) adm.set(key, value);
+	else (target as AnyRecord)[key] = value;
 	return value;
 }
 
@@ -237,36 +236,28 @@ export function deleteProperty(target: unknown, key: PropertyKey): boolean {
 	if (raw instanceof ObservableArray && isIndexKey(key)) {
 		return raw.deleteIndex(index(key));
 	}
-	if (isObservableObjectLike(raw)) {
-		remove(raw, key);
+	const adm = administrationOf(raw);
+	if (adm) {
+		adm.delete(key);
 		return true;
 	}
-	return delete (raw as AnyRecord)[key];
+	return delete (target as AnyRecord)[key];
 }
 
 /** `key in target`, tracked for observable objects (including keys added later) and arrays. */
 export function hasProperty(target: unknown, key: PropertyKey): boolean {
 	const raw = rawOf(target);
-	if (raw instanceof ObservableArray) {
-		observeArray(raw);
-		return key in raw;
-	}
-	if (isObservableObjectLike(raw)) return has(raw, key) || key in raw;
-	return key in (raw as object);
+	if (raw instanceof ObservableArray) observeRawArray(raw);
+	const adm = administrationOf(raw);
+	return adm ? adm.has(key) : key in (raw as object);
 }
 
 /** `Object.keys(target)`, tracked for observable objects (keys added / removed) and arrays. */
 export function keysOf(target: unknown): string[] {
 	const raw = rawOf(target);
-	if (raw instanceof ProxyLike) {
-		return (raw as ProxyLike<AnyRecord>).keys();
-	}
-	if (raw instanceof ObservableArray) {
-		observeArray(raw);
-	} else if (typeof raw === "object" && raw !== null) {
-		administrationOf(raw)?.keys(); // tracks the keys
-	}
-	return Object.keys(raw as object);
+	if (raw instanceof ObservableArray) observeRawArray(raw);
+	const adm = administrationOf(raw);
+	return adm ? adm.keys() : Object.keys(raw as object);
 }
 
 /** `Object.values(target)`, tracked like {@link keysOf}. */

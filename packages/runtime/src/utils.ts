@@ -1,20 +1,22 @@
 /** `toJS`, `configure` and the `isObservable*` checks. */
 import {
 	isObservableArray,
-	isPlainObject,
-	ObservableBox,
 	ObservableMap,
 	ObservableSet,
 } from "./collections.js";
 import { Computed } from "./computed.js";
 import {
 	DEV,
+	Dep,
 	type EnforceActions,
 	globalState,
 	observableValues,
 } from "./core.js";
+import { isPlainObject } from "./enhance.js";
 import { isObservableObject } from "./observable.js";
 import { ProxyLike } from "./proxy-like.js";
+import { Reaction } from "./reaction.js";
+import { ObservableValue } from "./value.js";
 
 // The runtime targets any JS environment.
 declare const console: { warn(...args: unknown[]): void };
@@ -24,7 +26,11 @@ export function isObservable(value: unknown): boolean {
 	return (
 		typeof value === "object" &&
 		value !== null &&
-		(observableValues.has(value) || isObservableObject(value))
+		(observableValues.has(value) ||
+			isObservableObject(value) ||
+			value instanceof Dep ||
+			value instanceof Computed ||
+			value instanceof Reaction)
 	);
 }
 
@@ -44,8 +50,8 @@ export function isObservableSet(
 
 export function isBoxedObservable(
 	value: unknown,
-): value is ObservableBox<unknown> {
-	return value instanceof ObservableBox;
+): value is ObservableValue<unknown> {
+	return value instanceof ObservableValue;
 }
 
 export function isComputed(value: unknown): value is Computed<unknown> {
@@ -83,7 +89,8 @@ function convert(value: unknown, seen: Map<unknown, unknown>): unknown {
 		for (const v of value) out.add(convert(v, seen));
 		return out;
 	}
-	if (value instanceof ObservableBox) return value;
+	if (value instanceof ObservableValue) return convert(value.get(), seen);
+	if (value instanceof Computed || value instanceof Reaction) return value;
 	const source = value instanceof ProxyLike ? value.unwrap() : value;
 	if (!isPlainObject(source) && !isObservableObject(value)) return value;
 	const out: Record<string, unknown> = {};
@@ -112,17 +119,60 @@ export interface ConfigureOptions {
 	 * API (`set`, `remove`, `has`, `keys`...) where the compiler can't see the observable.
 	 */
 	useProxies?: "always" | "ifavailable" | "never";
+	/** Warn about computeds read outside reactive contexts and actions. */
+	computedRequiresReaction?: boolean;
+	/** Warn about reactions that read no observables. */
+	reactionRequiresObservable?: boolean;
+	/** Warn about observables read outside reactive contexts and actions. */
+	observableRequiresReaction?: boolean;
+	/** Don't catch errors in reactions and computeds (for debugging). */
+	disableErrorBoundaries?: boolean;
+	/** Use this module's own state (it always does: every copy of the runtime has its own). */
+	isolateGlobalState?: boolean;
+	/** Members of classes can't be redefined, and actions not overwritten (default `true`). */
+	safeDescriptors?: boolean;
+	/** Runs the reactions at the end of each outermost batch. */
+	reactionScheduler?: (run: () => void) => void;
 }
 
-const KNOWN = new Set(["enforceActions", "useProxies"]);
+const BOOLEANS = [
+	"computedRequiresReaction",
+	"reactionRequiresObservable",
+	"observableRequiresReaction",
+	"disableErrorBoundaries",
+	"safeDescriptors",
+] as const;
+
+const KNOWN = new Set<string>([
+	...BOOLEANS,
+	"enforceActions",
+	"isolateGlobalState",
+	"reactionScheduler",
+	"useProxies",
+]);
 
 /** Global settings, like MobX's `configure`. */
 export function configure(options: ConfigureOptions): void {
-	if (options.enforceActions !== undefined) {
-		globalState.enforceActions = options.enforceActions;
-	}
 	if (options.useProxies !== undefined) {
 		globalState.useProxies = options.useProxies !== "never";
+	}
+	if (options.enforceActions !== undefined) {
+		globalState.enforceActions = options.enforceActions;
+		globalState.allowStateChanges = options.enforceActions === "never";
+	}
+	for (const key of BOOLEANS) {
+		if (key in options) globalState[key] = !!options[key];
+	}
+	globalState.allowStateReads = !globalState.observableRequiresReaction;
+	if (DEV && globalState.disableErrorBoundaries) {
+		console.warn(
+			"[sobx] WARNING: Debug feature only. MobX will NOT recover from errors when `disableErrorBoundaries` is enabled.",
+		);
+	}
+	if (options.reactionScheduler) {
+		const { reactionScheduler } = options;
+		const base = globalState.reactionScheduler;
+		globalState.reactionScheduler = (run) => reactionScheduler(() => base(run));
 	}
 	if (DEV) {
 		for (const key of Object.keys(options)) {
