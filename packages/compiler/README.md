@@ -34,7 +34,7 @@ Each entry exports a `sobxCompiler(options?)` function. Only files that import f
 - **`moduleSpecifier`** — Module to treat as sobx (only transform imports from here). Default: `"@sobx/magic"`
 - **`diagnostics`** — Per-code severity overrides, e.g. `{ "deep-mutation": "warning" }`. `"error"` fails the build, `"warning"` is logged, `"info"` and `"off"` are silent. Defaults are in `DEFAULT_SEVERITY`.
 
-Standard decorators (`@observable accessor x`) are parsed; your bundler must also transform them for your target (for example esbuild with `target: "es2022"`).
+Decorators are parsed and left as they are; your bundler must transform them: standard ones (`@observable accessor x`) for your target (for example esbuild with `target: "es2022"`), legacy ones (`@observable x`, with `makeObservable(this)`) with TypeScript's `experimentalDecorators` (either setting of `useDefineForClassFields` works).
 
 ### Vite
 
@@ -103,10 +103,10 @@ export default {
 ## How it works
 
 1. **Analyze.** Each file that mentions the module specifier is analyzed by the sobx analyzer, a native (Rust / [oxc](https://oxc.rs)) addon that produces the IR described by [`@sobx/ast`](../ast).
-2. **Report.** The analyzer's diagnostics are re-graded for compiling, and the compiler adds its own (unsupported options, observables left to the runtime). Errors fail the build, with every error listed (`file:line:col - error code: message`); warnings are logged.
+2. **Report.** The analyzer's diagnostics are re-graded for compiling, and the compiler adds its own (unknown options, observables left to the runtime). Errors are what would fail at runtime; they fail the build, with every error listed (`file:line:col - error code: message`). Likely mistakes are warnings, which are logged. What the analyzer can't see (annotations or options from a variable, escaping observables...) is info: it works, through the runtime.
 3. **Rewrite.**
-   - Imports from the module specifier are redirected to `@sobx/runtime`, which implements the whole supported API (`observable`, `computed`, `reaction`, `autorun`, `action`, `runInAction`, `makeObservable`, `makeAutoObservable`, annotations and decorators).
-   - Local `observable({...})` objects whose every use can be rewritten (the fast path) become a `ProxyLike`: reads become `s.get("k")`, writes `s.set("k", v)`, `++` / `--` `s.update(...)`, `delete` `s.delete(...)`, destructuring and method calls (`s.get("m").call(s)`) too, and `this.k` inside their methods. Everything else (exported or escaping objects, dynamic keys, classes, ...) is left to the runtime, which puts it behind a `Proxy`.
+   - Imports from the module specifier are redirected to `@sobx/runtime`, which implements MobX's whole API. All of its exports are known to the analyzer, and can be used anywhere; types can be imported without `import type`.
+   - Local `observable({...})` objects whose every use can be rewritten (the fast path) become a `ProxyLike`: reads become `s.get("k")`, writes `s.set("k", v)`, `++` / `--` `s.update(...)`, `delete` `s.delete(...)`, destructuring and method calls (`s.get("m").call(s)`) too, and `this.k` inside their methods; getters become cached computeds. Everything else (exported or escaping objects, dynamic keys, classes, ...) is left to the runtime, which puts it behind a `Proxy`.
    - On the observables it sees created that aren't on the fast path, undeclared and dynamic keys, `delete`, `in`, `Object.keys` / `values` / `entries`, array index and `length`, and writes through nested values become direct runtime calls (`getProperty`, `setProperty`, `deleteProperty`, `hasProperty`, `keysOf`...). Their `Proxy` observes them anyway; with `configure({ useProxies: "never" })`, these calls do. What can't be rewritten is an info diagnostic (`unsupported-operation`, `uncompiled-write`).
    - Nothing else is touched: code that only uses parameters, imports, plain data... is output as it is.
 
@@ -139,3 +139,5 @@ pnpm --filter @sobx/compiler build:native   # writes sobx-compiler.node (git-ign
 The transform fixtures in `src/__fixtures__` import from `"mobx"` (and tests pass `moduleSpecifier: "mobx"`) to avoid a circular dependency on the `@sobx/magic` package. The tests need the native analyzer built (`pnpm --filter @sobx/compiler build:native`).
 
 The analyzer's own tests are in `src/analyzer`: specs that assert on the IR for each pattern, and an invariant fuzz (`fuzz.spec.ts`; `SOBX_FUZZ_SEEDS` sets the number of generated programs, 400 by default).
+
+The compile tests run compiled code and compare it with MobX: `compile.spec.ts` (the API), `values.spec.ts` (reading and writing observables however they're reached) and `mobx-api.spec.ts` (every MobX export; legacy and standard decorators, compiled with esbuild). They use the built `@sobx/runtime`, so build it first (`pnpm build`).

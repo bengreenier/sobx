@@ -19,7 +19,7 @@ Requires a Rust toolchain (`cargo`).
 pnpm --filter @sobx/compiler build:native   # cargo build --release + copy to packages/compiler/sobx-compiler.node
 ```
 
-After building, `pnpm --filter @sobx/ast test` also runs the `native` project. It is skipped when the addon is missing.
+After building, `pnpm --filter @sobx/compiler test` runs the tests. A new MobX export must be added to the lists at the top of `src/analyzer.rs` (and to `@sobx/magic`); `packages/compiler/src/mobx-api.spec.ts` fails otherwise.
 
 ## API
 
