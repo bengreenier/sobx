@@ -9,8 +9,8 @@
  * observables it can fully see into a plain `ProxyLike` instead.
  */
 
-import { createAction, isAction } from "./action.js";
-import { createFlow, type FlowPromise, isFlow } from "./async.js";
+import { createAction, isAction, markAction } from "./action.js";
+import { createFlow, type FlowPromise, isFlow, markFlow } from "./async.js";
 import {
 	type ArrayOptions,
 	type BoxOptions,
@@ -181,10 +181,18 @@ function observableAnnotation(
 const observableDeep = observableAnnotation("observable", deep);
 const observableRef = observableAnnotation("observable.ref", ref);
 const observableShallow = observableAnnotation("observable.shallow", shallow);
+const struct: Enhancer = (value) => {
+	if (DEV && observableValues.has(value as object)) {
+		throw new Error(
+			"sobx: observable.struct should not be used with observable values",
+		);
+	}
+	return value;
+};
 const observableStruct = observableAnnotation(
 	"observable.struct",
-	ref,
-	deepEqual,
+	struct,
+	(a, b) => deepEqual(a, b),
 );
 
 interface ComputedAnnotation extends Annotation {
@@ -225,7 +233,7 @@ function computedAnnotation(
 
 const computedPlain = computedAnnotation("computed");
 const computedStruct = computedAnnotation("computed.struct", {
-	equals: deepEqual,
+	equals: (a, b) => deepEqual(a, b),
 });
 
 interface ActionOptions {
@@ -470,7 +478,7 @@ function isGenerator(fn: unknown): boolean {
 }
 
 function annotationOf(
-	value: AnnotationValue,
+	value: AnnotationValue | undefined,
 	key: PropertyKey,
 ): Annotation | boolean {
 	if (typeof value === "boolean") return value;
@@ -478,7 +486,7 @@ function annotationOf(
 		ANNOTATION
 	];
 	if (!annotation) {
-		throw new Error(`sobx: invalid annotation for "${String(key)}".`);
+		throw new Error(`sobx: Invalid annotation for "${String(key)}".`);
 	}
 	return annotation;
 }
@@ -506,7 +514,8 @@ hooks.fn = (fn, name) => {
 
 // -- making observables ---------------------------------------------------------------------
 
-function defaultAnnotationOf(options: ObservableOptions): Annotation {
+function defaultAnnotationOf(options?: ObservableOptions): Annotation {
+	if (options === undefined) return autoDefault;
 	const { defaultDecorator } = options;
 	if (defaultDecorator !== undefined) {
 		const annotation = annotationOf(defaultDecorator, "defaultDecorator");
@@ -542,10 +551,10 @@ export function makeObservable<
 >(
 	target: T,
 	annotations?: AnnotationsMap<T, AdditionalKeys>,
-	options: ObservableOptions = {},
+	options?: ObservableOptions,
 ): T {
 	initialize(() => {
-		const adm = administer(target, defaultAnnotationOf(options), options.name);
+		const adm = administer(target, defaultAnnotationOf(options), options);
 		if (annotations) {
 			if (
 				DEV &&
@@ -559,7 +568,6 @@ export function makeObservable<
 				const value = (annotations as Record<PropertyKey, AnnotationValue>)[
 					key
 				];
-				if (value === undefined) continue;
 				adm.make(key, annotationOf(value, key));
 			}
 			return;
@@ -583,7 +591,7 @@ export function makeAutoObservable<
 >(
 	target: T,
 	overrides: AnnotationsMap<T, AdditionalKeys> = {},
-	options: ObservableOptions = {},
+	options?: ObservableOptions,
 ): T {
 	const prototype = Object.getPrototypeOf(target);
 	if (DEV) {
@@ -601,7 +609,7 @@ export function makeAutoObservable<
 	for (const key of Reflect.ownKeys(overrides)) {
 		if (DEV && !(key in target)) {
 			throw new Error(
-				`sobx: makeAutoObservable: "${String(key)}" is not a member of the target.`,
+				`sobx: Cannot apply an annotation to '${String(key)}': Field not found.`,
 			);
 		}
 	}
@@ -609,24 +617,37 @@ export function makeAutoObservable<
 		return extendObservable(target, target, overrides, options) as T;
 	}
 	initialize(() => {
-		const adm = administer(target, defaultAnnotationOf(options), options.name);
+		const adm = administer(target, defaultAnnotationOf(options), options);
+		for (const key of memberKeys(target, prototype)) {
+			const value = (overrides as Record<PropertyKey, AnnotationValue>)[key];
+			adm.make(
+				key,
+				Object.hasOwn(overrides, key) ? annotationOf(value, key) : true,
+			);
+		}
+	});
+	return target;
+}
+
+const memberKeysCache = Symbol("sobx.keys");
+
+/** The members of a class, by its first instance (cached on the prototype). */
+function memberKeys(target: object, prototype: object): Set<PropertyKey> {
+	const holder = prototype as { [memberKeysCache]?: Set<PropertyKey> };
+	if (!Object.hasOwn(prototype, memberKeysCache)) {
 		const keys = new Set([
 			...Reflect.ownKeys(target),
 			...Reflect.ownKeys(prototype),
 		]);
 		keys.delete("constructor");
 		for (const key of keys) {
-			if (typeof key === "symbol" && isInternalKey(target, key)) continue;
-			const value = (overrides as Record<PropertyKey, AnnotationValue>)[key];
-			adm.make(
-				key,
-				Object.hasOwn(overrides, key) && value !== undefined
-					? annotationOf(value, key)
-					: true,
-			);
+			if (typeof key === "symbol" && isInternalKey(target, key)) {
+				keys.delete(key);
+			}
 		}
-	});
-	return target;
+		Object.defineProperty(prototype, memberKeysCache, { value: keys });
+	}
+	return holder[memberKeysCache] as Set<PropertyKey>;
 }
 
 /** The administration and stored annotations aren't members. */
@@ -642,7 +663,7 @@ export function extendObservable<A extends object, B extends object>(
 	target: A,
 	properties: B,
 	annotations?: AnnotationsMap<B>,
-	options: ObservableOptions = {},
+	options?: ObservableOptions,
 ): A & B {
 	if (DEV) {
 		if (typeof target !== "object" || target === null) {
@@ -675,7 +696,7 @@ export function extendObservable<A extends object, B extends object>(
 		PropertyDescriptor
 	>;
 	initialize(() => {
-		const adm = administer(target, defaultAnnotationOf(options), options.name);
+		const adm = administer(target, defaultAnnotationOf(options), options);
 		extendAll(adm, descriptors, annotations);
 	});
 	return target as A & B;
@@ -691,7 +712,7 @@ function extendAll(
 		adm.extend(
 			key,
 			descriptors[key] as PropertyDescriptor,
-			annotations && Object.hasOwn(annotations, key) && value !== undefined
+			annotations && Object.hasOwn(annotations, key)
 				? annotationOf(value, key)
 				: true,
 		);
@@ -710,7 +731,7 @@ function createObservableObject<T extends object>(
 	>;
 	return initialize(() => {
 		const target = {} as T;
-		const adm = administer(target, defaultAnnotationOf(options), options.name);
+		const adm = administer(target, defaultAnnotationOf(options), options);
 		const object =
 			options.proxy === false ? target : maybeProxy(target, "object");
 		// Registered before its values are converted, so cyclic / shared values convert once.
@@ -741,9 +762,8 @@ function createObservable(
 	const other: object = value;
 	if (other instanceof Map) return new ObservableMap(other, collection);
 	if (other instanceof Set) return new ObservableSet(other, collection);
-	throw new Error(
-		"sobx: observable() supports plain objects, arrays, Maps and Sets.",
-	);
+	// As in MobX, anything else (class instances, dates...) stays as it is.
+	return value;
 }
 
 function createBox<T>(
@@ -823,11 +843,11 @@ function storeAnnotation(
 
 /** `this`'s administration, created for classes whose decorators need it. */
 const instanceAdministration = (instance: object) =>
-	administer(instance, autoDefault);
+	administer(instance, autoDefault, undefined);
 
 function kindError(context: DecoratorContext, what: string): never {
 	throw new Error(
-		`sobx: ${what} (got a ${context.kind}: "${String(context.name)}").`,
+		`sobx: The decorator applied to '${String(context.name)}' cannot be used on a ${context.kind} element: ${what}.`,
 	);
 }
 
@@ -836,6 +856,12 @@ function decorateObservable(
 	context: DecoratorContext,
 ) {
 	if (context.kind !== "accessor") {
+		const name = String(context.name);
+		if (context.kind === "field") {
+			throw new Error(
+				`sobx: Please use \`@observable accessor ${name}\` instead of \`@observable ${name}\``,
+			);
+		}
 		kindError(context, "@observable needs an `accessor` field");
 	}
 	const key = context.name;
@@ -878,17 +904,28 @@ function decorateComputed(
 	const key = context.name;
 	// Per class: a subclass's getter may call `super`'s.
 	const computeds = new WeakMap<object, Computed<unknown>>();
-	return function (this: object) {
-		let computed = computeds.get(this);
+	const computedOf = (instance: object) => {
+		let computed = computeds.get(instance);
 		if (!computed) {
-			const adm = instanceAdministration(this);
+			const adm = instanceAdministration(instance);
 			computed = adm.createComputed(key, getter, annotation.options);
-			computeds.set(this, computed);
+			computeds.set(instance, computed);
 			if (!adm.values.has(key)) adm.values.set(key, computed);
 		}
-		return computed.get();
+		return computed;
 	};
+	const decorated = function (this: object) {
+		return computedOf(this).get();
+	};
+	decoratedGetters.set(decorated, computedOf);
+	return decorated;
 }
+
+/** Getters decorated with `@computed`: the computed of an instance. */
+export const decoratedGetters = new WeakMap<
+	() => unknown,
+	(instance: object) => Computed<unknown>
+>();
 
 function decorateAction(
 	annotation: ActionAnnotation,
@@ -904,7 +941,7 @@ function decorateAction(
 	if (context.kind === "field") {
 		return function (this: unknown, initial: AnyFn) {
 			const wrapped = create(initial);
-			return options.bound ? wrapped.bind(this) : wrapped;
+			return options.bound ? markAction(wrapped.bind(this)) : wrapped;
 		};
 	}
 	if (context.kind !== "method") {
@@ -914,7 +951,7 @@ function decorateAction(
 	if (options.bound) {
 		context.addInitializer(function (this: unknown) {
 			const self = this as Record<PropertyKey, AnyFn>;
-			self[key] = (self[key] as AnyFn).bind(self);
+			self[key] = markAction((self[key] as AnyFn).bind(self));
 		});
 	}
 	return wrapped;
@@ -933,7 +970,7 @@ function decorateFlow(
 		const key = context.name;
 		context.addInitializer(function (this: unknown) {
 			const self = this as Record<PropertyKey, AnyFn>;
-			self[key] = (self[key] as AnyFn).bind(self);
+			self[key] = markFlow((self[key] as AnyFn).bind(self));
 		});
 	}
 	return wrapped;
@@ -1182,16 +1219,34 @@ export const autoAction = actionFactory(autoActionPlain, autoActionBound);
 
 /** `@flow *m()` (also usable in annotation maps, and as a legacy decorator). */
 export interface FlowAnnotation extends LegacyDecorator {
-	<This, A extends unknown[], R>(
-		fn: (this: This, ...args: A) => Generator<unknown, R, unknown>,
-		context: ClassMethodDecoratorContext<
-			This,
-			(this: This, ...args: A) => Generator<unknown, R, unknown>
-		>,
-	): (this: This, ...args: A) => FlowPromise<R>;
+	<
+		This,
+		Value extends (
+			this: This,
+			// biome-ignore lint/suspicious/noExplicitAny: any arguments
+			...args: any
+		) => Generator<unknown, unknown, never> | AsyncGenerator,
+	>(
+		fn: Value,
+		context: ClassMethodDecoratorContext<This, Value>,
+		// (Calling it returns a promise: see `flowResult`.)
+	): Value;
 }
 
 export interface FlowFn extends FlowAnnotation {
+	// First: as a decorator it has two arguments.
+	<
+		This,
+		Value extends (
+			this: This,
+			// biome-ignore lint/suspicious/noExplicitAny: any arguments
+			...args: any
+		) => Generator<unknown, unknown, never> | AsyncGenerator,
+	>(
+		fn: Value,
+		context: ClassMethodDecoratorContext<This, Value>,
+		// (Calling it returns a promise: see `flowResult`.)
+	): Value;
 	<A extends unknown[], R>(
 		generator: (
 			...args: A

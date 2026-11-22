@@ -15,6 +15,15 @@ export function isSpying(): boolean {
 	return DEV && listeners.length > 0;
 }
 
+/** The spies (for `_getGlobalState`). */
+export function getSpies(): SpyListener[] {
+	return listeners;
+}
+export function setSpies(spies: SpyListener[]): void {
+	listeners = spies;
+	globalState.spying = spies.length;
+}
+
 /** Report `event` to spies. */
 export function spyReport(event: SpyEvent): void {
 	if (!isSpying()) return;
@@ -40,14 +49,12 @@ export function spy(listener: SpyListener): Lambda {
 		console.warn("[sobx] spy is a no-op in production builds");
 		return () => {};
 	}
-	listeners = [...listeners, listener];
-	globalState.spying++;
+	setSpies([...listeners, listener]);
 	let active = true;
 	return once(() => {
 		if (!active) return;
 		active = false;
-		listeners = listeners.filter((l) => l !== listener);
-		globalState.spying--;
+		setSpies(listeners.filter((l) => l !== listener));
 	});
 }
 

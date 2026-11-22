@@ -23,6 +23,8 @@ export interface Derivation {
 /** Minimal view of a computed, used to check whether a "maybe stale" derivation must re-run. */
 export interface VersionedComputed {
 	version: number;
+	/** Whether a dependency (maybe) changed since it was computed. */
+	readonly stale: boolean;
 	/** Bring the value up to date (recomputing if needed). */
 	refresh(): void;
 	/** Called when nothing depends on it any more, at the end of the batch. */
@@ -34,11 +36,9 @@ export interface Named {
 	readonly name: string;
 }
 
-let lastId = 0;
-
 /** A debug name: `prefix@<id>` in development builds, `prefix` in production. */
 export function debugName(prefix: string): string {
-	return DEV ? `${prefix}@${++lastId}` : prefix;
+	return DEV ? `${prefix}@${nextId()}` : prefix;
 }
 
 /** The time, for spies. */
@@ -46,7 +46,7 @@ export const now: () => number = () =>
 	(globalThis as unknown as { Date: { now(): number } }).Date.now();
 
 export function nextId(): number {
-	return ++lastId;
+	return ++globalState.mobxGuid;
 }
 
 /** One observable slot that derivations can depend on (an "atom" in MobX). */
@@ -61,6 +61,8 @@ export class Dep {
 	/** `onBecomeObserved` / `onBecomeUnobserved` listeners. */
 	onBO: Set<() => void> | null = null;
 	onBUO: Set<() => void> | null = null;
+	/** Called when nothing observes it any more (unless it has the listeners above). */
+	onUnused: (() => void) | null = null;
 	/**
 	 * `owner`: the computed whose value this is. `holder` (and `key` in it): what it belongs to,
 	 * for its name.
@@ -75,7 +77,8 @@ export class Dep {
 		if (this.owner) return this.owner.name;
 		const { holder, key } = this;
 		const base = typeof holder === "string" ? holder : (holder?.name ?? "Atom");
-		return key === undefined ? base : `${base}.${stringifyKey(key)}`;
+		if (key === undefined) return base;
+		return DEV ? `${base}.${stringifyKey(key)}` : `${base}.key`;
 	}
 
 	/** Record that a derivation reads it. Returns whether something observes it. */
@@ -160,6 +163,10 @@ function defaults() {
 		pendingUnobservations: [] as Dep[],
 		isRunningReactions: false,
 		currentActionId: 0,
+		/** The last id in names. */
+		mobxGuid: 0,
+		/** Proxies throw for what wouldn't work without them (`useProxies: "ifavailable"`). */
+		verifyProxies: false,
 	};
 }
 
@@ -178,6 +185,8 @@ export function resetGlobalState(): void {
 		"observableRequiresReaction",
 		"disableErrorBoundaries",
 		"reactionScheduler",
+		"mobxGuid",
+		"verifyProxies",
 	];
 	for (const [key, value] of Object.entries(defaults())) {
 		if (!kept.includes(key))
@@ -222,7 +231,7 @@ export function checkWriteIf(observed: boolean, what: string | Named): void {
 	console.warn(
 		mode === "never"
 			? `[sobx] Side effects like changing state are not allowed at this point. Are you trying to modify state from, for example, a computed value or the render function of a React component? You can wrap side effects in 'runInAction' (or decorate functions with 'action') if needed. Tried to modify: ${name}`
-			: `[sobx] Since enforceActions is "${mode}", ${mode === "observed" ? "observed " : ""}observable values must be changed inside actions (action, runInAction, flow). Tried to modify: ${name}`,
+			: `[sobx] Since strict-mode is enabled, changing (observed) observable values without using an action is not allowed. Tried to modify: ${name}`,
 	);
 }
 
@@ -447,6 +456,9 @@ function processUnobservations(): void {
 			if (dep.onBUO !== null) for (const listener of dep.onBUO) listener();
 		}
 		dep.owner?.suspend();
+		if (dep.onUnused !== null && dep.onBO === null && dep.onBUO === null) {
+			dep.onUnused();
+		}
 	}
 	globalState.pendingUnobservations = [];
 }
@@ -575,8 +587,12 @@ export function rebind(
 	const length = Math.min(from.length, to.length);
 	while (same < length && from[same] === to[same]) same++;
 	if (same === from.length && same === to.length) return;
-	for (let i = same; i < to.length; i++)
-		(to[i] as Dep).observers.add(derivation);
+	for (let i = same; i < to.length; i++) {
+		const dep = to[i] as Dep;
+		dep.observers.add(derivation);
+		// It changed after it was read, before it was observed.
+		if (dep.owner?.stale) derivation.onChange(false, dep);
+	}
 	if (same === from.length) return;
 	const kept = new Set(to);
 	for (let i = same; i < from.length; i++) {
@@ -603,14 +619,26 @@ export function emptyTracking(): Tracking {
 }
 
 /** Whether any computed read by a derivation has changed since it was read. */
-export function computedsChanged(tracking: Tracking): boolean {
+export function computedsChanged(
+	tracking: Tracking,
+	derivation: Derivation,
+): boolean {
 	if (tracking.versions === null) return false;
 	const outer = globalState.tracking;
 	globalState.tracking = null;
 	try {
 		for (const [computed, version] of tracking.versions) {
-			computed.refresh();
-			if (computed.version !== version) return true;
+			try {
+				computed.refresh();
+			} catch {
+				// In a cycle: it's found again (and reported) by computing.
+				return true;
+			}
+			if (computed.version === version) continue;
+			if (derivation.tracing !== null) {
+				logTrace(derivation, computed as unknown as Named);
+			}
+			return true;
 		}
 		return false;
 	} finally {
@@ -619,7 +647,7 @@ export function computedsChanged(tracking: Tracking): boolean {
 }
 
 /** Log why `derivation` is invalidated (`trace()`). */
-export function logTrace(derivation: Derivation, dep: Dep): void {
+export function logTrace(derivation: Derivation, dep: Named): void {
 	console.log(
 		`[sobx.trace] '${derivation.name}' is invalidated due to a change in: '${dep.name}'`,
 	);
@@ -656,46 +684,108 @@ export function batch<T>(fn: () => T): T {
 	}
 }
 
-/** Structural equality for plain objects, arrays, Maps, Sets and primitives. */
-export function deepEqual(a: unknown, b: unknown): boolean {
+const tagOf = (value: unknown): string => Object.prototype.toString.call(value);
+
+/** What is compared of arrays, Maps and Sets. */
+function contents(value: unknown): unknown {
+	if (value instanceof Map || value instanceof Set) {
+		return Array.from(value.entries());
+	}
+	return value;
+}
+
+/**
+ * Structural equality (as MobX's, which is underscore's): primitives and their wrappers, dates
+ * and regular expressions by value, arrays, Maps, Sets and objects by content (objects of
+ * different classes aren't equal), down to `depth` levels if given. Cycles are fine.
+ */
+export function deepEqual(a: unknown, b: unknown, depth = -1): boolean {
+	return equal(a, b, depth, [], []);
+}
+
+function equal(
+	a: unknown,
+	b: unknown,
+	depth: number,
+	as: unknown[],
+	bs: unknown[],
+): boolean {
 	if (Object.is(a, b)) return true;
+	if (a === null || a === undefined || b === null || b === undefined) {
+		return false;
+	}
 	if (
-		typeof a !== "object" ||
-		typeof b !== "object" ||
-		a === null ||
-		b === null
+		typeof a !== "function" &&
+		typeof a !== "object" &&
+		typeof b !== "object"
 	) {
 		return false;
 	}
-	if (Array.isArray(a)) {
-		return (
-			Array.isArray(b) &&
-			a.length === b.length &&
-			a.every((x, i) => deepEqual(x, b[i]))
-		);
+	const tag = tagOf(a);
+	if (tag !== tagOf(b)) return false;
+	let levels = depth;
+	switch (tag) {
+		case "[object RegExp]":
+		case "[object String]":
+			return `${a}` === `${b}`;
+		case "[object Number]":
+		case "[object Date]":
+		case "[object Boolean]": {
+			const x = Number(a);
+			const y = Number(b);
+			return tag === "[object Number]" ? Object.is(x, y) : x === y;
+		}
+		case "[object Symbol]":
+			return (
+				Symbol.prototype.valueOf.call(a) === Symbol.prototype.valueOf.call(b)
+			);
+		case "[object Map]":
+		case "[object Set]":
+			// Compared as arrays of entries: an incidental level.
+			if (levels >= 0) levels++;
+			break;
 	}
-	if (a instanceof Map) {
-		if (!(b instanceof Map) || a.size !== b.size) return false;
-		for (const [k, v] of a)
-			if (!b.has(k) || !deepEqual(v, b.get(k))) return false;
-		return true;
+	const isArray = tag === "[object Array]";
+	const x = contents(a) as Record<string, unknown>;
+	const y = contents(b) as Record<string, unknown>;
+	if (!isArray) {
+		if (typeof x !== "object" || typeof y !== "object") return false;
+		const xc = x.constructor as unknown;
+		const yc = y.constructor as unknown;
+		const isGlobal = (c: unknown) => typeof c === "function" && c instanceof c;
+		if (
+			xc !== yc &&
+			!(isGlobal(xc) && isGlobal(yc)) &&
+			"constructor" in x &&
+			"constructor" in y
+		) {
+			return false;
+		}
 	}
-	if (a instanceof Set) {
-		if (!(b instanceof Set) || a.size !== b.size) return false;
-		for (const v of a) if (!b.has(v)) return false;
-		return true;
+	if (levels === 0) return false;
+	if (levels < 0) levels = -1;
+	// Being compared already: equal if to the same.
+	for (let i = as.length - 1; i >= 0; i--) if (as[i] === a) return bs[i] === b;
+	as.push(a);
+	bs.push(b);
+	const keys = isArray ? null : Object.keys(x);
+	let same: boolean;
+	if (keys === null) {
+		const xs = x as unknown as unknown[];
+		const ys = y as unknown as unknown[];
+		same =
+			xs.length === ys.length &&
+			Array.from(xs).every((v, i) => equal(v, ys[i], levels - 1, as, bs));
+	} else {
+		same =
+			keys.length === Object.keys(y).length &&
+			keys.every(
+				(k) => Object.hasOwn(y, k) && equal(x[k], y[k], levels - 1, as, bs),
+			);
 	}
-	if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
-	const keys = Object.keys(a);
-	if (keys.length !== Object.keys(b).length) return false;
-	return keys.every(
-		(k) =>
-			Object.hasOwn(b, k) &&
-			deepEqual(
-				(a as Record<string, unknown>)[k],
-				(b as Record<string, unknown>)[k],
-			),
-	);
+	as.pop();
+	bs.pop();
+	return same;
 }
 
 export type Equals = (a: unknown, b: unknown) => boolean;

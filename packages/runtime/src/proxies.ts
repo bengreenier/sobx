@@ -12,13 +12,20 @@ import {
 	type ObservableArray,
 	observeRawArray,
 } from "./collections.js";
-import { $mobx, globalState, hooks, proxyOf } from "./core.js";
+import { $mobx, DEV, globalState, hooks, proxyOf } from "./core.js";
 import type { ObjectAdministration } from "./object.js";
 
 type AnyRecord = Record<PropertyKey, unknown>;
 
 const admOf = (target: AnyRecord) =>
 	(target as unknown as { [$mobx]: ObjectAdministration })[$mobx];
+
+/** `useProxies: "ifavailable"`: development builds check for what wouldn't work without. */
+function needsProxies(what: string): never {
+	throw new Error(
+		`sobx: MobX is currently configured to be able to run in ES5 mode, but in ES5 MobX won't be able to ${what}`,
+	);
+}
 
 const objectHandler: ProxyHandler<AnyRecord> = {
 	get(target, key, receiver) {
@@ -34,19 +41,44 @@ const objectHandler: ProxyHandler<AnyRecord> = {
 		if (receiver !== proxyOf(target) && !Object.hasOwn(target, key)) {
 			return Reflect.set(target, key, value, receiver);
 		}
+		if (DEV && globalState.verifyProxies && !admOf(target).values.has(key)) {
+			needsProxies(
+				"add a new observable property through direct assignment. Use 'set' from 'sobx' instead.",
+			);
+		}
 		// An interceptor refusing isn't an error.
 		return admOf(target).set(key, value, true) ?? true;
 	},
 	deleteProperty(target, key) {
+		if (DEV && globalState.verifyProxies) {
+			needsProxies(
+				"delete properties from an observable object. Use 'remove' from 'sobx' instead.",
+			);
+		}
 		return admOf(target).delete(key, true) ?? true;
 	},
 	has(target, key) {
+		if (DEV && globalState.verifyProxies && globalState.tracking !== null) {
+			needsProxies(
+				"detect new properties using the 'in' operator. Use 'has' from 'sobx' instead.",
+			);
+		}
 		return admOf(target).has(key);
 	},
 	ownKeys(target) {
+		if (DEV && globalState.verifyProxies && globalState.tracking !== null) {
+			needsProxies(
+				"iterate keys to detect added / removed properties. Use 'keys' from 'sobx' instead.",
+			);
+		}
 		return admOf(target).ownKeys() as Array<string | symbol>;
 	},
 	defineProperty(target, key, descriptor) {
+		if (DEV && globalState.verifyProxies) {
+			needsProxies(
+				"define property on an observable object. Use 'defineProperty' from 'sobx' instead.",
+			);
+		}
 		return admOf(target).defineProperty(key, descriptor, true) ?? true;
 	},
 	preventExtensions() {
@@ -63,7 +95,12 @@ const arrayHandler: ProxyHandler<ObservableArray<unknown>> = {
 	get(target, key, receiver) {
 		if (isArrayKey(key)) {
 			observeRawArray(target);
-			return target[key as never];
+			const value = target[key as never];
+			if (key === "length") return value;
+			const adm = arrayAdministrationOf(target);
+			return adm?.dehancer === undefined || !(key in target)
+				? value
+				: adm.dehancer(value);
 		}
 		return Reflect.get(target, key, receiver);
 	},

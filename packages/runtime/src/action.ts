@@ -19,6 +19,7 @@ export interface ActionRunInfo {
 	allowStateReads: boolean;
 	startTime: number;
 	parentActionId: number;
+	actionId: number;
 	error?: unknown;
 }
 
@@ -51,6 +52,7 @@ export function startAction(
 		allowStateReads: globalState.allowStateReads,
 		startTime,
 		parentActionId: globalState.currentActionId,
+		actionId: nextActionId,
 	};
 	startBatch();
 	if (info.runAsAction) {
@@ -63,6 +65,11 @@ export function startAction(
 }
 
 export function endAction(info: ActionRunInfo): void {
+	if (globalState.currentActionId !== info.actionId) {
+		throw new Error(
+			"sobx: invalid action stack. did you forget to finish an action?",
+		);
+	}
 	globalState.currentActionId = info.parentActionId;
 	if (info.error !== undefined) globalState.suppressReactionErrors = true;
 	globalState.allowStateChanges = info.allowStateChanges;
@@ -160,6 +167,12 @@ export function runInAction<T>(fn: () => T): T {
 }
 
 const actions = new WeakSet<object>();
+
+/** `fn` is (bound from) an action. */
+export function markAction<F extends object>(fn: F): F {
+	actions.add(fn);
+	return fn;
+}
 
 /** Whether `fn` was created by `action()` / an action annotation. */
 export function isAction(fn: unknown): boolean {

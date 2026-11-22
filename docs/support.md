@@ -51,7 +51,7 @@ code imports it.
 | `spy`, `trace`, `getDebugName`, `getDependencyTree`, `getObserverTree`, `getAtom`, `createAtom`, `Reaction`, `$mobx` | Yes | `spy` is for development builds, as in MobX. |
 | `isObservable`, `isObservableArray`, `isObservableObject`, `isObservableMap`, `isObservableSet`, `isBoxedObservable`, `isObservableProp`, `isComputed`, `isComputedProp`, `isAction`, `isFlowCancellationError`, `untracked` | Yes | |
 | Legacy (`experimentalDecorators`) decorators: `@observable x`, `@computed get x()`, `@action m()`, `@action("name")`, `@flow *m()`, `@override`... | Yes | With `makeObservable(this)` in the constructor, as in MobX. Without it: error (`invalid-annotation`). With either setting of `useDefineForClassFields`. |
-| `_allowStateChanges`, `_autoAction`, `_startAction`, ... (MobX's exports for other libraries) | Yes | Except `_interceptReads`: error (`unknown-import`). |
+| `_allowStateChanges`, `_autoAction`, `_interceptReads`, `_startAction`, ... (MobX's exports for other libraries) | Yes | |
 
 ## React
 
@@ -156,6 +156,10 @@ The runtime and the compiler are tested against MobX itself:
   covers the API. `mobx-api.spec.ts` checks that every MobX export can be imported from
   `@sobx/magic`, and that valid MobX code using them compiles without errors and behaves the same.
 
+- `packages/runtime/src/conformance.spec.ts` covers what MobX's own test suite (6.16.1, 825 tests) found
+  when run against the runtime. Of these, 803 pass as they are, and 809 not comparing the wording of
+  messages; the others check MobX's internals or the numbers in debug names.
+
 They compare what is logged, including how often reactions run. Known differences:
 
 - `"i" in array` and `Object.keys(array)` are tracked (MobX doesn't track them).
@@ -165,13 +169,13 @@ They compare what is logged, including how often reactions run. Known difference
   tracking of individual array indexes.
 - `when` without an effect rejects with `Error("WHEN_TIMEOUT")` / `Error("WHEN_CANCELLED")`;
   a cancelled flow rejects with a `FlowCancellationError` (`isFlowCancellationError(e)`).
-- `_interceptReads` is not implemented (MobX's undocumented hook to change the values read).
-- Messages of errors and warnings are worded differently.
+- Messages of errors and warnings start with `sobx`, and some are worded differently.
+- MobX's private fields (`observers_`, `values_`...) don't exist; observables decorated with standard
+  decorators are set up when the instance is created (MobX does when they're first used); iterators
+  of Maps and Sets are JavaScript's own.
 - Each copy of the runtime has its own state (as with MobX's `isolateGlobalState`, which is accepted
   but does nothing more).
 - The results of `ObservableSet`'s `union`, `intersection`... are in JavaScript's order.
-- Spies see a computed's first value as a change from `undefined`, and an error thrown by a
-  computed as the error itself (MobX passes internal objects).
 - React: [`@sobx/react`](../packages/react) has mobx-react's API; `observerBatching` does
   nothing (React 18+ batches updates itself).
 - Plain object literals from another realm (an iframe, `node:vm`) are accepted by `observable()`,

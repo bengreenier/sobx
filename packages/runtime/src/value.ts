@@ -38,6 +38,8 @@ export const UNCHANGED = Symbol("unchanged");
 export class ObservableValue<T> extends Dep implements Hooks, Owner {
 	interceptors: Interceptor[] | null = null;
 	listeners: ChangeListener[] | null = null;
+	/** @internal Changes what is read (`_interceptReads`). */
+	dehancer: ((value: T) => T) | undefined = undefined;
 	/** @internal The current value (untracked). */
 	current: T;
 
@@ -55,7 +57,9 @@ export class ObservableValue<T> extends Dep implements Hooks, Owner {
 
 	get(): T {
 		reportObserved(this);
-		return this.current;
+		return this.dehancer === undefined
+			? this.current
+			: this.dehancer(this.current);
 	}
 
 	set(value: T): void {

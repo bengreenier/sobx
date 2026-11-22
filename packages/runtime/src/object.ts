@@ -114,7 +114,7 @@ export class ObjectAdministration implements Hooks, Named {
 	readonly isPlain: boolean;
 	private presence: Map<PropertyKey, Presence> | null = null;
 	/** Which annotation each member has (development builds). */
-	private readonly applied: Record<PropertyKey, string> = {};
+	private readonly applied: Record<PropertyKey, string> = Object.create(null);
 
 	constructor(
 		readonly target: object,
@@ -242,7 +242,7 @@ export class ObjectAdministration implements Hooks, Named {
 		const current = this.applied[key];
 		if (current === undefined) return;
 		throw new Error(
-			`sobx: Cannot apply '${annotation.type}' to '${this.memberName(key)}': the field is already annotated with '${current}'. Re-annotating fields is not allowed. Use 'override' annotation for methods overridden by subclass.`,
+			`sobx: Cannot apply '${annotation.type}' to '${this.memberName(key)}':\nThe field is already annotated with '${current}'.\nRe-annotating fields is not allowed.\nUse 'override' annotation for methods overridden by subclass.`,
 		);
 	}
 
@@ -269,7 +269,7 @@ export class ObjectAdministration implements Hooks, Named {
 			// Decorated in a subclass, whose constructor hasn't run yet.
 			if ((this.target as Stored)[storedAnnotations]?.[key]) return;
 			throw new Error(
-				`sobx: Invalid annotation '${effective.type}': "${this.memberName(key)}" is not a member of the target.`,
+				`sobx: Cannot apply '${effective.type}' to '${this.memberName(key)}': Field not found.`,
 			);
 		}
 		let source: object | null = this.target;
@@ -518,17 +518,22 @@ export function administrationOf(
 export function administer(
 	target: object,
 	defaultAnnotation: Annotation,
-	name?: string,
+	options: { name?: string } | undefined,
 ): ObjectAdministration {
 	const raw = rawOf(target);
+	const existing = (raw as { [$mobx]?: unknown })[$mobx];
+	if (existing !== undefined && !(existing instanceof ObjectAdministration)) {
+		throw new Error(
+			`sobx: Cannot convert '${(existing as Named).name}' into observable object:\nThe target is already observable of different type.\nExtending builtins is not supported.`,
+		);
+	}
 	if (Object.hasOwn(raw, $mobx)) {
-		const adm = administrationOf(raw);
-		if (!adm) {
+		if (DEV && options) {
 			throw new Error(
-				"sobx: Cannot convert observable collections into an observable object.",
+				"sobx: Options can't be provided for already observable objects.",
 			);
 		}
-		return adm;
+		return existing as ObjectAdministration;
 	}
 	if (!Object.isExtensible(raw)) {
 		throw new Error(
@@ -540,7 +545,7 @@ export function administer(
 		: (raw as object).constructor?.name || "ObservableObject";
 	const adm = new ObjectAdministration(
 		raw,
-		name ?? (DEV ? `${kind}@${nextId()}` : "ObservableObject"),
+		options?.name ?? (DEV ? `${kind}@${nextId()}` : "ObservableObject"),
 		defaultAnnotation,
 	);
 	Object.defineProperty(raw, $mobx, {

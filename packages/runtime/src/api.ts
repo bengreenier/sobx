@@ -69,8 +69,13 @@ export function set(...args: [unknown, unknown, unknown?]): void {
 		const i = index(key);
 		if (!(i >= 0)) throw new RangeError(`sobx: invalid index ${String(key)}.`);
 		// As in MobX: grow first, then assign.
-		if (i >= target.length) target.setLength(i + 1);
-		target.set(i, value);
+		startBatch();
+		try {
+			if (i >= target.length) target.setLength(i + 1);
+			target.set(i, value);
+		} finally {
+			endBatch();
+		}
 	} else if (target instanceof ProxyLike) {
 		(target as ProxyLike<AnyRecord>).set(key as PropertyKey, value);
 	} else {
@@ -120,7 +125,7 @@ export function get(target: object, key: unknown): unknown {
 	target = rawOf(target);
 	if (target instanceof ObservableMap) return target.get(key);
 	if (target instanceof ObservableArray) {
-		return has(target, key) ? target[index(key)] : undefined;
+		return has(target, key) ? target.get(index(key)) : undefined;
 	}
 	if (target instanceof ProxyLike) {
 		return (target as ProxyLike<AnyRecord>).get(key as PropertyKey);
@@ -190,7 +195,7 @@ export function getProperty(target: unknown, key: PropertyKey): unknown {
 	if (raw instanceof ObservableArray) {
 		if (key === "length" || isIndexKey(key)) {
 			observeRawArray(raw);
-			return raw[key as never];
+			return key === "length" ? raw.length : raw.get(Number(key));
 		}
 		return (target as AnyRecord)[key];
 	}

@@ -6,6 +6,7 @@ import {
 	Dep,
 	type Derivation,
 	debugName,
+	deepEqual,
 	type Equals,
 	emptyTracking,
 	endBatch,
@@ -39,6 +40,10 @@ export interface ComputedOptions<T> {
 	context?: unknown;
 	/** Warn when read outside reactive contexts and actions. */
 	requiresReaction?: boolean;
+	/** Compare values by structure (the same as `equals: comparer.structural`). */
+	compareStructural?: boolean;
+	/** Compare values by structure (the same as `equals: comparer.structural`). */
+	struct?: boolean;
 }
 
 declare const console: {
@@ -50,6 +55,10 @@ declare const console: {
 class CaughtException {
 	constructor(readonly cause: unknown) {}
 }
+
+const NO_VALUE = new CaughtException(null);
+
+const structural: Equals = (a, b) => deepEqual(a, b);
 
 const FRESH = 0;
 const MAYBE_STALE = 1;
@@ -70,7 +79,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 	private computing = false;
 	private runningSetter = false;
 	private hasValue = false;
-	private value: T | CaughtException | undefined;
+	private value: T | CaughtException | undefined = NO_VALUE;
 	private readonly equals: Equals;
 	private readonly setter: ((value: T) => void) | undefined;
 
@@ -83,7 +92,9 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		this.name =
 			options.name || (DEV ? fn.name : "") || debugName("ComputedValue");
 		this.dep = new Dep(this);
-		this.equals = (options.equals as Equals | undefined) ?? Object.is;
+		this.equals =
+			(options.equals as Equals | undefined) ??
+			(options.compareStructural || options.struct ? structural : Object.is);
 		if (options.set) {
 			this.setter = createAction(`${this.name}-setter`, options.set);
 		}
@@ -94,9 +105,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 	}
 
 	get(): T {
-		if (this.computing) {
-			throw new Error(`sobx: Cycle detected in computation ${this.name}`);
-		}
+		if (this.computing) this.cycle();
 		const outer = globalState.tracking;
 		if (
 			globalState.batchDepth === 0 &&
@@ -116,7 +125,16 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		startBatch();
 		try {
 			reportObserved(this.dep);
-			this.refresh();
+			const context = globalState.trackingContext;
+			// Its dependencies are observed (by it), for as long as it's kept alive.
+			if (this.options.keepAlive && context === null) {
+				globalState.trackingContext = this;
+			}
+			try {
+				this.refresh();
+			} finally {
+				globalState.trackingContext = context;
+			}
 			if (outer !== null) {
 				outer.versions ??= new Map();
 				outer.versions.set(this, this.version);
@@ -149,6 +167,12 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		}
 	}
 
+	private cycle(): never {
+		throw new Error(
+			`sobx: Cycle detected in computation ${this.name}: ${this.fn}`,
+		);
+	}
+
 	private compute(): T | CaughtException {
 		this.computing = true;
 		try {
@@ -179,22 +203,29 @@ export class Computed<T> implements Derivation, VersionedComputed {
 	}
 
 	/** @internal */
+	get stale(): boolean {
+		return this.state !== FRESH;
+	}
+
+	/** @internal */
 	refresh(): void {
+		if (this.computing) this.cycle();
 		if (this.active && this.state === FRESH) return;
 		if (
 			this.active &&
 			this.state === MAYBE_STALE &&
-			!computedsChanged(this.tracking)
+			!computedsChanged(this.tracking, this)
 		) {
 			this.state = FRESH;
 			return;
 		}
+		// (Before: what it reads may change meanwhile.)
+		this.state = FRESH;
 		const { value, tracking } = track(this, this.tracking, () =>
 			this.compute(),
 		);
 		this.tracking = tracking;
 		this.active = true;
-		this.state = FRESH;
 		const old = this.value;
 		if (
 			!this.hasValue ||
@@ -211,8 +242,8 @@ export class Computed<T> implements Derivation, VersionedComputed {
 					debugObjectName: this.name,
 					object: this.scope,
 					type: "update",
-					oldValue: old instanceof CaughtException ? old.cause : old,
-					newValue: value instanceof CaughtException ? value.cause : value,
+					oldValue: old,
+					newValue: value,
 				});
 			}
 		}
@@ -223,8 +254,8 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		const was = this.state;
 		if (definite) this.state = STALE;
 		else if (this.state === FRESH) this.state = MAYBE_STALE;
+		if (definite && was !== STALE && this.tracing !== null) logTrace(this, dep);
 		if (was === FRESH) {
-			if (this.tracing !== null) logTrace(this, dep);
 			for (const observer of [...this.dep.observers]) {
 				observer.onChange(false, this.dep);
 			}
@@ -238,7 +269,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		this.tracking = emptyTracking();
 		this.active = false;
 		this.hasValue = false;
-		this.value = undefined;
+		this.value = NO_VALUE;
 		this.state = STALE;
 		if (this.tracing !== null) {
 			console.log(
@@ -269,7 +300,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 	}
 
 	toString(): string {
-		return this.name;
+		return `${this.name}[${this.fn}]`;
 	}
 
 	valueOf(): unknown {

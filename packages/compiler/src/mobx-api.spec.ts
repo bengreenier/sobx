@@ -183,6 +183,45 @@ log(p.x);
 `,
 	);
 
+	it("standard decorators", async () => {
+		const source = `import { observable, computed, action, flow, autorun, isAction, isFlow, isComputedProp, isObservableProp, observe } from "@sobx/magic";
+class Parent {
+	@observable accessor count = 1;
+	@computed get total() { return this.count + 1; }
+	@action.bound inc() { this.count++; }
+	@action plain() { this.count += 10; }
+	@action.bound field = () => { this.count += 100; };
+	@flow.bound *load() { this.count = yield Promise.resolve(5); }
+}
+class OnlyComputed { @computed get one() { return 1; } }
+class Child extends Parent {
+	@action.bound inc() { super.inc(); this.count++; }
+	@computed get total() { return super.total * 2; }
+	@observable accessor extra = 1;
+}
+const child = new Child();
+log(isComputedProp(child, "total"), isObservableProp(child, "count"), isObservableProp(child, "extra"));
+log(isAction(child.inc), isAction(child.plain), isAction(child.field), isFlow(child.load));
+log(isComputedProp(new OnlyComputed(), "one"), isComputedProp(child, "count"));
+observe(new Parent(), "total", () => {});
+autorun(() => log(child.total));
+const { inc, load, field } = child;
+inc();
+field();
+child.plain();
+await load();
+`;
+		const target = (code: string) =>
+			transformSync(code, {
+				loader: "ts",
+				target: "es2022",
+				tsconfigRaw: { compilerOptions: { useDefineForClassFields: true } },
+			}).code;
+		const theirs = await run(target(source), mobx);
+		expect(theirs.length).toBeGreaterThan(5);
+		expect(await run(target(compile(source)), runtime)).toEqual(theirs);
+	});
+
 	parity(
 		"annotations and options from elsewhere",
 		`

@@ -1,4 +1,4 @@
-import { executeAction, NO_ARGS } from "./action.js";
+import { executeAction, isAction, NO_ARGS } from "./action.js";
 import { type Computed, enableTrace, observeComputed } from "./computed.js";
 import {
 	$mobx,
@@ -21,6 +21,7 @@ import {
 	trackOnly,
 	untracked,
 } from "./core.js";
+import { isPlainObject } from "./enhance.js";
 import { isSpying, spyReport, spyReportEnd, spyReportStart } from "./spy.js";
 
 // The runtime targets any JS environment.
@@ -88,6 +89,11 @@ export class Reaction implements Derivation {
 		return new Set(this.tracking.deps);
 	}
 
+	/** Whether it will run at the end of the batch. */
+	get isScheduled(): boolean {
+		return this.scheduled;
+	}
+
 	get isDisposed(): boolean {
 		return this.disposed;
 	}
@@ -99,7 +105,7 @@ export class Reaction implements Derivation {
 		else if (this.state === FRESH) this.state = MAYBE_STALE;
 		// Already invalidated: nothing new until it tracks again.
 		if (was === STALE) return;
-		if (was === FRESH && this.tracing !== null) logTrace(this, dep);
+		if (definite && this.tracing !== null) logTrace(this, dep);
 		this.enqueue();
 	}
 
@@ -141,7 +147,7 @@ export class Reaction implements Derivation {
 
 	private shouldRun(): boolean {
 		if (this.state === FRESH) return false;
-		if (this.state === MAYBE_STALE && !computedsChanged(this.tracking)) {
+		if (this.state === MAYBE_STALE && !computedsChanged(this.tracking, this)) {
 			this.state = FRESH;
 			return false;
 		}
@@ -185,11 +191,13 @@ export class Reaction implements Derivation {
 			return;
 		}
 		if (globalState.disableErrorBoundaries) throw error;
-		const message = `[sobx] uncaught error in '${this}'`;
+		const message = DEV
+			? `[sobx] Encountered an uncaught exception that was thrown by a reaction or observer component, in: '${this}'`
+			: `[sobx] uncaught error in '${this}'`;
 		if (!globalState.suppressReactionErrors) console.error(message, error);
 		else if (DEV) {
 			console.warn(
-				`[sobx] (error in reaction '${this.name}' suppressed, fix the error of the action below)`,
+				`[sobx] (error in reaction '${this.name}' suppressed, fix error of causing action below)`,
 			);
 		}
 		if (isSpying()) {
@@ -299,6 +307,18 @@ export function reaction<T, FireImmediately extends boolean = false>(
 	) => void,
 	options: ReactionOptions<T> & { fireImmediately?: FireImmediately } = {},
 ): Disposer {
+	if (DEV) {
+		if (typeof data !== "function" || typeof effect !== "function") {
+			throw new Error(
+				"sobx: First and second argument to `reaction` should be functions",
+			);
+		}
+		if (!isPlainObject(options)) {
+			throw new Error(
+				"sobx: Third argument of `reactions` should be an object",
+			);
+		}
+	}
 	const name = options.name ?? debugName("Reaction");
 	const { onError } = options;
 	type Effect = (value: T, previous: T | undefined, r: Reaction) => void;
@@ -367,6 +387,16 @@ export function autorun(
 	fn: (r: Reaction) => void,
 	options: AutorunOptions = {},
 ): Disposer {
+	if (DEV) {
+		if (typeof fn !== "function") {
+			throw new Error("sobx: Autorun expects a function as first argument");
+		}
+		if (isAction(fn)) {
+			throw new Error(
+				"sobx: Autorun does not accept actions since actions are untrackable",
+			);
+		}
+	}
 	const name =
 		options.name ?? (DEV ? fn.name || debugName("Autorun") : "Autorun");
 	const runSync = !options.scheduler && !options.delay;

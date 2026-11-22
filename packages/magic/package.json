@@ -31,7 +31,7 @@
 		"build:types": "tsc -p tsconfig.lib.json",
 		"build:lib": "vite build",
 		"lint": "biome check .",
-		"test": "tsc -p tsconfig.type-tests.json"
+		"test": "tsc -p tsconfig.type-tests.json && tsc -p tsconfig.type-tests-standard.json"
 	},
 	"dependencies": {
 		"@sobx/runtime": "workspace:*"

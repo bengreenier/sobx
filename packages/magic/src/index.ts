@@ -134,6 +134,8 @@ export const _getAdministration =
 	placeholder<typeof runtime._getAdministration>("_getAdministration");
 export const _getGlobalState =
 	placeholder<typeof runtime._getGlobalState>("_getGlobalState");
+export const _interceptReads =
+	placeholder<typeof runtime._interceptReads>("_interceptReads");
 export const _isComputingDerivation = placeholder<
 	typeof runtime._isComputingDerivation
 >("_isComputingDerivation");

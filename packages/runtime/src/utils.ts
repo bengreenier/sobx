@@ -6,13 +6,14 @@ import {
 } from "./collections.js";
 import { Computed } from "./computed.js";
 import {
+	$mobx,
 	DEV,
 	Dep,
 	type EnforceActions,
 	globalState,
 	observableValues,
 } from "./core.js";
-import { isPlainObject } from "./enhance.js";
+import { administrationOf } from "./object.js";
 import { isObservableObject } from "./observable.js";
 import { ProxyLike } from "./proxy-like.js";
 import { Reaction } from "./reaction.js";
@@ -23,6 +24,10 @@ declare const console: { warn(...args: unknown[]): void };
 
 /** Whether `value` is observable (an observable object, array, Map, Set or box). */
 export function isObservable(value: unknown): boolean {
+	if (typeof value === "function") {
+		// Reactions, by their disposer.
+		return (value as { [$mobx]?: unknown })[$mobx] !== undefined;
+	}
 	return (
 		typeof value === "object" &&
 		value !== null &&
@@ -59,49 +64,58 @@ export function isComputed(value: unknown): value is Computed<unknown> {
 }
 
 /**
- * Recursively convert observables (and the plain objects / arrays containing them) to plain
- * JavaScript: arrays, objects (their enumerable data properties, without computeds and
- * functions), Maps and Sets. Cycles are preserved.
+ * Convert an observable, and the observables in it, to plain JavaScript: arrays, objects (their
+ * enumerable properties: not computeds, nor actions), Maps and Sets; boxes to their value.
+ * Anything that isn't observable stays as it is. Cycles are preserved.
  */
-export function toJS<T>(value: T): T {
+export function toJS<T>(value: T, ...options: unknown[]): T {
+	if (DEV && options.length > 0) {
+		throw new Error("sobx: toJS no longer supports options");
+	}
 	return convert(value, new Map()) as T;
 }
 
 function convert(value: unknown, seen: Map<unknown, unknown>): unknown {
-	if (typeof value !== "object" || value === null) return value;
+	if (typeof value !== "object" || value === null || !isObservable(value)) {
+		return value;
+	}
+	if (value instanceof ObservableValue || value instanceof Computed) {
+		return convert(value.get(), seen);
+	}
 	const done = seen.get(value);
 	if (done !== undefined) return done;
-	if (Array.isArray(value) || isObservableArray(value)) {
+	if (isObservableArray(value)) {
 		const out: unknown[] = [];
 		seen.set(value, out);
-		for (const item of value as unknown[]) out.push(convert(item, seen));
+		for (const item of value) out.push(convert(item, seen));
 		return out;
 	}
-	if (value instanceof Map) {
+	if (value instanceof ObservableMap) {
 		const out = new Map();
 		seen.set(value, out);
 		for (const [k, v] of value) out.set(k, convert(v, seen));
 		return out;
 	}
-	if (value instanceof Set) {
+	if (value instanceof ObservableSet) {
 		const out = new Set();
 		seen.set(value, out);
 		for (const v of value) out.add(convert(v, seen));
 		return out;
 	}
-	if (value instanceof ObservableValue) return convert(value.get(), seen);
-	if (value instanceof Computed || value instanceof Reaction) return value;
-	const source = value instanceof ProxyLike ? value.unwrap() : value;
-	if (!isPlainObject(source) && !isObservableObject(value)) return value;
-	const out: Record<string, unknown> = {};
+	const out: Record<PropertyKey, unknown> = {};
+	if (value instanceof ProxyLike) {
+		seen.set(value, out);
+		for (const key of value.keys()) {
+			out[key] = convert(value.get(key as never), seen);
+		}
+		return out;
+	}
+	const adm = administrationOf(value);
+	if (!adm) return value;
 	seen.set(value, out);
-	for (const key of Object.keys(source)) {
-		const item =
-			value instanceof ProxyLike
-				? value.get(key as never)
-				: (value as Record<string, unknown>)[key];
-		if (typeof item === "function") continue;
-		out[key] = convert(item, seen);
+	for (const key of adm.ownKeys()) {
+		if (!Object.prototype.propertyIsEnumerable.call(adm.target, key)) continue;
+		out[key] = convert((value as Record<PropertyKey, unknown>)[key], seen);
 	}
 	return out;
 }
@@ -114,7 +128,8 @@ export interface ConfigureOptions {
 	enforceActions?: EnforceActions;
 	/**
 	 * Whether observable objects and arrays created from now on are behind a `Proxy`, so that any
-	 * code observes everything on them: `"always"` (default) or `"ifavailable"`. With `"never"`,
+	 * code observes everything on them: `"always"` (default) or `"ifavailable"` (the same, but
+	 * development builds throw for what needs proxies). With `"never"`,
 	 * adding / deleting keys, `in`, `Object.keys` and array index / `length` need the explicit
 	 * API (`set`, `remove`, `has`, `keys`...) where the compiler can't see the observable.
 	 */
@@ -155,6 +170,7 @@ const KNOWN = new Set<string>([
 export function configure(options: ConfigureOptions): void {
 	if (options.useProxies !== undefined) {
 		globalState.useProxies = options.useProxies !== "never";
+		globalState.verifyProxies = options.useProxies === "ifavailable";
 	}
 	if (options.enforceActions !== undefined) {
 		globalState.enforceActions = options.enforceActions;

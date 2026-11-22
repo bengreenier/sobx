@@ -332,7 +332,7 @@ describe("observable()", () => {
 		expect(seen).toEqual([2, 4, 20]);
 		// As in MobX: methods stay enumerable, computeds don't.
 		expect(Object.keys(s)).toEqual(["a", "inc"]);
-		expect(toJS(s)).toEqual({ a: 10 });
+		expect(toJS(s)).toEqual({ a: 10, inc: expect.any(Function) });
 	});
 
 	it("respects overrides and autoBind", () => {
@@ -366,8 +366,9 @@ describe("observable()", () => {
 		expect(run).toHaveBeenCalledTimes(2);
 	});
 
-	it("rejects class instances", () => {
-		expect(() => observable(new (class {})())).toThrow(/plain objects/);
+	it("leaves class instances as they are", () => {
+		const instance = new (class {})();
+		expect(observable(instance)).toBe(instance);
 	});
 });
 
@@ -432,11 +433,11 @@ describe("classes", () => {
 
 	it("makeObservable rejects unknown members and invalid annotations", () => {
 		expect(() => makeObservable({ a: 1 }, { b: observable })).toThrow(
-			/not a member/,
+			/Field not found/,
 		);
 		expect(() =>
 			makeObservable({ a: 1 }, { a: (() => {}) as unknown as boolean }),
-		).toThrow(/invalid annotation/);
+		).toThrow(/Invalid annotation/);
 	});
 
 	it("standard decorators", () => {

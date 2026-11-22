@@ -29,8 +29,15 @@ import {
 	resetGlobalState,
 } from "./core.js";
 import { administrationOf, type ObjectAdministration } from "./object.js";
+import { decoratedGetters } from "./observable.js";
 import { Reaction } from "./reaction.js";
-import type { ChangeListener, Interceptor, Lambda } from "./spy.js";
+import {
+	type ChangeListener,
+	getSpies,
+	type Interceptor,
+	type Lambda,
+	setSpies,
+} from "./spy.js";
 import type {
 	IArrayDidChange,
 	IArrayWillChange,
@@ -427,40 +434,31 @@ export function isObservableProp(thing: Any, property: PropertyKey): boolean {
 			"sobx: isObservable(object, propertyName) is not supported for arrays and maps. Use map.has or array.length instead.",
 		);
 	}
-	const adm = administrationOf(thing);
-	return adm !== undefined && hasMember(thing, adm, property);
+	return memberOf(thing, property) !== undefined;
 }
 
-/** Decorated members are set up when first used. */
-function hasMember(
-	thing: Any,
-	adm: ObjectAdministration,
-	property: PropertyKey,
-): boolean {
-	if (adm.values.has(property)) return true;
+/** The observable or computed behind `property`. */
+function memberOf(thing: Any, property: PropertyKey) {
+	if (typeof thing !== "object" || thing === null) return undefined;
+	const adm = administrationOf(thing);
+	const member = adm?.values.get(property);
+	if (member !== undefined) return member;
+	// Getters decorated with `@computed` are set up when first read.
 	for (
 		let o = thing;
 		o && o !== Object.prototype;
 		o = Object.getPrototypeOf(o)
 	) {
-		const descriptor = Object.getOwnPropertyDescriptor(o, property);
-		if (descriptor) {
-			if (!descriptor.get) return false;
-			void thing[property];
-			return adm.values.has(property);
-		}
+		const descriptor = Object.getOwnPropertyDescriptor(rawOf(o), property);
+		if (descriptor) return decoratedGetters.get(descriptor.get as Any)?.(thing);
 	}
-	return false;
+	return undefined;
 }
 
 /** Whether `property` of `thing` is a computed. */
 export function isComputedProp(thing: Any, property: PropertyKey): boolean {
-	const adm = administrationOf(thing);
-	return (
-		adm !== undefined &&
-		hasMember(thing, adm, property) &&
-		adm.values.get(property) instanceof Computed
-	);
+	const member = memberOf(thing, property);
+	return member instanceof Computed;
 }
 
 export function isAtom(thing: unknown): boolean {
@@ -470,6 +468,45 @@ export function isAtom(thing: unknown): boolean {
 export { ObservableValue };
 
 // -- what libraries built on MobX use -------------------------------------------------------
+
+/**
+ * `_interceptReads(observable, handler)` / `_interceptReads(object, property, handler)`: `handler`
+ * changes the values read from an array, Map, box or property.
+ */
+export function _interceptReads(
+	thing: Any,
+	propertyOrHandler: Any,
+	handler?: (value: Any) => Any,
+): Lambda {
+	const raw = rawOf(thing);
+	let target: { dehancer: ((value: Any) => Any) | undefined };
+	if (
+		raw instanceof ObservableMap ||
+		raw instanceof ObservableArray ||
+		raw instanceof ObservableValue
+	) {
+		target = getAdministration(raw) as Any;
+	} else if (administrationOf(raw)) {
+		if (DEV && typeof propertyOrHandler === "function") {
+			throw new Error(
+				"sobx: InterceptReads can only be used with a specific property, not with an object in general",
+			);
+		}
+		target = getAdministration(raw, propertyOrHandler) as Any;
+	} else {
+		throw new Error(
+			"sobx: Expected observable map, object or array as first array",
+		);
+	}
+	if (DEV && target.dehancer !== undefined) {
+		throw new Error("sobx: An intercept reader was already established");
+	}
+	target.dehancer =
+		typeof propertyOrHandler === "function" ? propertyOrHandler : handler;
+	return () => {
+		target.dehancer = undefined;
+	};
+}
 
 /** Run `fn` allowing (or not) state changes. */
 export function _allowStateChanges<T>(allow: boolean, fn: () => T): T {
@@ -531,6 +568,24 @@ export function _getGlobalState() {
 		},
 		get safeDescriptors() {
 			return globalState.safeDescriptors;
+		},
+		get pendingReactions() {
+			return globalState.pendingReactions;
+		},
+		get pendingUnobservations() {
+			return globalState.pendingUnobservations;
+		},
+		get mobxGuid() {
+			return globalState.mobxGuid;
+		},
+		set mobxGuid(id) {
+			globalState.mobxGuid = id;
+		},
+		get spyListeners() {
+			return getSpies();
+		},
+		set spyListeners(spies) {
+			setSpies(spies);
 		},
 	};
 }

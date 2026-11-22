@@ -1,0 +1,7 @@
+{
+	"extends": "./tsconfig.type-tests.json",
+	"compilerOptions": {
+		"experimentalDecorators": false
+	},
+	"include": ["type-tests/standard/*.ts"]
+}

@@ -13,7 +13,6 @@ const OMITTED: Record<string, string> = {
 	__esModule: "module interop",
 	default: "module interop",
 	"module.exports": "module interop",
-	_interceptReads: "MobX-internal hook (dehancers), undocumented",
 };
 
 /** Members that are MobX's private implementation (not in its documentation or public types). */

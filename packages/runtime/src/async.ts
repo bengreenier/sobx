@@ -12,6 +12,8 @@ export interface WhenOptions {
 	name?: string;
 	/** Stops waiting when aborted (the promise form rejects). */
 	signal?: AbortSignalLike;
+	/** Warn when nothing observable is read. */
+	requiresObservable?: boolean;
 }
 
 /** The promise returned by `when(predicate)`, with `cancel()`. */
@@ -74,7 +76,12 @@ function whenEffect(
 			if (timer !== undefined) clearTimeout(timer);
 			run();
 		},
-		{ name, onError: options.onError, signal: options.signal },
+		{
+			name,
+			onError: options.onError,
+			requiresObservable: options.requiresObservable,
+			signal: options.signal,
+		},
 	);
 	return disposer;
 }
@@ -173,8 +180,14 @@ export function createFlow<A extends unknown[], R>(
 ): (...args: A) => FlowPromise<R> {
 	const wrapped = function (this: unknown, ...args: A): FlowPromise<R> {
 		const id = ++flowId;
-		const step = (what: string, fn: () => Step): Step =>
-			executeAction(`${label} - runid: ${id} - ${what}`, false, fn as never);
+		const step = (what: string, value: unknown, fn: () => Step): Step =>
+			executeAction(
+				`${label} - runid: ${id} - ${what}`,
+				false,
+				fn as never,
+				undefined,
+				[value],
+			);
 		const gen = createAction(
 			`${label} - runid: ${id} - init`,
 			generator as never,
@@ -189,7 +202,7 @@ export function createFlow<A extends unknown[], R>(
 				pending = undefined;
 				let result: Step;
 				try {
-					result = step(`yield ${count++}`, () => gen.next(value));
+					result = step(`yield ${count++}`, value, () => gen.next(value));
 				} catch (error) {
 					reject(error);
 					return;
@@ -200,7 +213,7 @@ export function createFlow<A extends unknown[], R>(
 				pending = undefined;
 				let result: Step;
 				try {
-					result = step(`yield ${count++}`, () => gen.throw(error));
+					result = step(`yield ${count++}`, error, () => gen.throw(error));
 				} catch (e) {
 					reject(e);
 					return;
@@ -241,9 +254,11 @@ export function createFlow<A extends unknown[], R>(
 		});
 		return promise;
 	};
-	Object.defineProperties(wrapped, {
-		isMobXFlow: { value: true },
-		name: { value: label, configurable: true },
-	});
-	return wrapped;
+	Object.defineProperty(wrapped, "name", { value: label, configurable: true });
+	return markFlow(wrapped);
+}
+
+/** `fn` is (bound from) a flow. */
+export function markFlow<F extends object>(fn: F): F {
+	return Object.defineProperty(fn, "isMobXFlow", { value: true });
 }

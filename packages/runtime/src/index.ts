@@ -56,6 +56,7 @@ export {
 	_allowStateReadsStart,
 	_endAction,
 	_getGlobalState,
+	_interceptReads,
 	_isComputingDerivation,
 	_resetGlobalState,
 	_startAction,

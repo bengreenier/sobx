@@ -43,6 +43,7 @@ const VALUES: &[&str] = &[
     "_endAction",
     "_getAdministration",
     "_getGlobalState",
+    "_interceptReads",
     "_isComputingDerivation",
     "_resetGlobalState",
     "_startAction",

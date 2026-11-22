@@ -209,7 +209,8 @@ describe("observable objects", () => {
 		const o = observable(foreign);
 		expect(isObservableObject(o)).toBe(true);
 		expect(isObservableObject(o.nested)).toBe(true);
-		expect(() => observable(runInNewContext("new (class X {})()"))).toThrow();
+		const instance = runInNewContext("new (class X {})()");
+		expect(observable(instance)).toBe(instance);
 	});
 
 	it("can be made from frozen objects (as MobX)", () => {
@@ -360,7 +361,7 @@ describe("observable objects", () => {
 		expect(seen).toEqual(["[2,2]", "[6,6]", "[20,20]"]);
 		expect(getter).toHaveBeenCalledTimes(3);
 		expect(Object.keys(o)).toEqual(["n", "bump"]);
-		expect(toJS(o)).toEqual({ n: 10 });
+		expect(toJS(o)).toEqual({ n: 10, bump: expect.any(Function) });
 	});
 
 	it("reject assignment to a computed without a setter", () => {
@@ -469,6 +470,7 @@ describe("toJS", () => {
 		});
 		const plain = toJS(store);
 		expect(plain).toEqual({
+			add: expect.any(Function),
 			items: [{ n: 1 }],
 			byId: new Map([["a", { n: 2 }]]),
 			tags: new Set(["t"]),
@@ -511,7 +513,7 @@ describe("enforceActions", () => {
 		s.a = 2; // observed, outside an action
 		expect(warn).toHaveBeenCalledTimes(1);
 		expect(warn.mock.calls[0]?.[0]).toMatch(
-			/enforceActions is "observed".*: ObservableObject@\d+\.a/,
+			/Since strict-mode is enabled.*: ObservableObject@\d+\.a/,
 		);
 		action(() => {
 			s.a = 3;

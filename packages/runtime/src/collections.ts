@@ -65,30 +65,9 @@ export const comparer = {
 	/** `===`. */
 	identity: (a: unknown, b: unknown): boolean => a === b,
 	/** Deep structural equality. */
-	structural: deepEqual,
-	/** Equal if the same, or plain objects / arrays with the same (`Object.is`) entries. */
-	shallow: (a: unknown, b: unknown): boolean => {
-		if (Object.is(a, b)) return true;
-		if (typeof a !== "object" || typeof b !== "object" || !a || !b)
-			return false;
-		if (Array.isArray(a)) {
-			return (
-				Array.isArray(b) &&
-				a.length === b.length &&
-				a.every((x, i) => Object.is(x, b[i]))
-			);
-		}
-		const ka = Object.keys(a);
-		return (
-			ka.length === Object.keys(b).length &&
-			ka.every((k) =>
-				Object.is(
-					(a as Record<string, unknown>)[k],
-					(b as Record<string, unknown>)[k],
-				),
-			)
-		);
-	},
+	structural: (a: unknown, b: unknown): boolean => deepEqual(a, b),
+	/** Equal if the same, or arrays, objects, Maps or Sets with the same contents. */
+	shallow: (a: unknown, b: unknown): boolean => deepEqual(a, b, 1),
 };
 
 function batched(fn: () => void): void {
@@ -116,6 +95,8 @@ const MAX_SPREAD = 10000;
 
 /** What's behind an observable array. */
 export class ArrayAdministration implements Hooks, Named {
+	/** Changes what is read (`_interceptReads`). */
+	dehancer: ((value: unknown) => unknown) | undefined = undefined;
 	interceptors: Interceptor[] | null = null;
 	listeners: ChangeListener[] | null = null;
 	readonly dep: Dep;
@@ -184,6 +165,18 @@ export class ArrayAdministration implements Hooks, Named {
 		return addListener(this, listener);
 	}
 
+	dehance(value: unknown): unknown {
+		return this.dehancer === undefined ? value : this.dehancer(value);
+	}
+
+	/** What reading methods see. */
+	readable(): unknown[] {
+		const { array, dehancer } = this;
+		return dehancer === undefined
+			? (array as unknown[])
+			: values(array).map((value) => dehancer(value));
+	}
+
 	/** Every change of several elements. Returns the removed values. */
 	splice(
 		start: number | undefined,
@@ -234,7 +227,10 @@ export class ArrayAdministration implements Hooks, Named {
 				() => this.changed(),
 			);
 		}
-		return removed;
+		const { dehancer } = this;
+		return dehancer === undefined
+			? removed
+			: removed.map((value) => dehancer(value));
 	}
 
 	/** `array[index] = value`. */
@@ -384,7 +380,10 @@ export class ObservableArray<T = any> extends Array<T> {
 	get(index: number): T | undefined {
 		const self = rawOf(this);
 		observeRawArray(self);
-		return self[index];
+		const value = self[index];
+		return index >= 0 && index < self.length
+			? (administrationOf(self)?.dehance(value) as T)
+			: value;
 	}
 
 	/** Write element `index` (notifies), like `array[index] = value`. */
@@ -426,7 +425,7 @@ export class ObservableArray<T = any> extends Array<T> {
 	/** Remove the first occurrence of `value`; returns whether there was one. */
 	remove(value: T): boolean {
 		const self = rawOf(this);
-		const index = call("indexOf", self, [value]) as number;
+		const index = (administrationOf(self)?.readable() ?? self).indexOf(value);
 		if (index < 0) return false;
 		this.spliceWithArray(index, 1, []);
 		return true;
@@ -538,7 +537,7 @@ for (const name of ["sort", "reverse"]) {
 				`sobx: \`observableArray.${name}()\` mutates the array in-place, which is not allowed inside a derivation. Use \`array.slice().${name}()\` instead`,
 			);
 		}
-		const copy = values(array);
+		const copy = values(array).map((value) => adm.dehance(value));
 		call(name, copy, args);
 		adm.splice(0, array.length, copy);
 		return array;
@@ -621,7 +620,11 @@ for (const name of [
 					return callback.apply(this, values);
 				};
 			}
-			return builtin.apply(self, args);
+			const adm = administrationOf(self);
+			return builtin.apply(
+				adm?.dehancer === undefined ? self : adm.readable(),
+				args,
+			);
 		},
 		writable: true,
 		configurable: true,
@@ -695,6 +698,18 @@ export type MapEntries<K, V> =
 
 function entriesOf<K, V>(entries: MapEntries<K, V>): Iterable<readonly [K, V]> {
 	if (entries === null || entries === undefined) return [];
+	if (
+		entries instanceof Map &&
+		entries.constructor !== Map &&
+		!(entries instanceof ObservableMap)
+	) {
+		throw new Error(
+			`sobx: Cannot initialize from classes that inherit from Map: ${entries.constructor.name}`,
+		);
+	}
+	if (typeof entries !== "object") {
+		throw new Error(`sobx: Cannot convert to map from '${entries}'`);
+	}
 	if (Symbol.iterator in entries) return entries;
 	if (isPlainObject(entries)) {
 		return Reflect.ownKeys(entries)
@@ -704,7 +719,7 @@ function entriesOf<K, V>(entries: MapEntries<K, V>): Iterable<readonly [K, V]> {
 					[key, (entries as Record<PropertyKey, V>)[key]] as unknown as [K, V],
 			);
 	}
-	throw new Error(`sobx: Cannot initialize from ${String(entries)}`);
+	throw new Error(`sobx: Cannot initialize map from ${String(entries)}`);
 }
 
 /** One entry of a Map, for `observe(map, key, ...)` and `intercept(map, key, ...)`. */
@@ -755,6 +770,8 @@ export class ObservableMap<K = any, V = any>
 	readonly name: string;
 	interceptors: Interceptor[] | null = null;
 	listeners: ChangeListener[] | null = null;
+	/** Changes what is read (`_interceptReads`). */
+	dehancer: ((value: V) => V) | undefined;
 	private keyDeps: Map<K, Dep> | undefined;
 	/** Per key: whether it exists (`has()`), changed only when the key is added or deleted. */
 	private hasDeps: Map<K, Dep> | undefined;
@@ -804,6 +821,9 @@ export class ObservableMap<K = any, V = any>
 		let dep = this.keyDeps.get(key);
 		if (!dep) {
 			dep = new Dep(undefined, this, key);
+			dep.onUnused = () => {
+				if (!this.entryHooks?.has(key)) this.keyDeps?.delete(key);
+			};
 			this.keyDeps.set(key, dep);
 		}
 		return dep;
@@ -850,7 +870,7 @@ export class ObservableMap<K = any, V = any>
 				(added &&
 					(this.keysDep.observers.size > 0 ||
 						(this.hasDeps?.get(key)?.observers.size ?? 0) > 0)),
-			dep ?? this,
+			added ? this.keysDep : (dep ?? `${this.name}.${stringifyKey(key)}`),
 		);
 	}
 
@@ -869,7 +889,10 @@ export class ObservableMap<K = any, V = any>
 
 	override get(key: K): V | undefined {
 		this.observeKey(key);
-		return super.get(key);
+		const value = super.get(key);
+		return this.dehancer === undefined
+			? value
+			: (this.dehancer as (value: V | undefined) => V)(value);
 	}
 
 	/** Tracked: re-runs what read it when `key` is added or deleted (as in MobX). */
@@ -879,6 +902,9 @@ export class ObservableMap<K = any, V = any>
 			let dep = this.hasDeps.get(key);
 			if (!dep) {
 				dep = new Dep(undefined, `${this.name}.${stringifyKey(key)}?`);
+				dep.onUnused = () => {
+					this.hasDeps?.delete(key);
+				};
 				this.hasDeps.set(key, dep);
 			}
 			reportObserved(dep);
@@ -1007,7 +1033,7 @@ export class ObservableMap<K = any, V = any>
 
 	/** Set every entry of `other` (a Map, entries, or a plain object). */
 	merge(other?: MapEntries<K, V>): this {
-		const entries = untracked(() => [...entriesOf(other)]);
+		const entries = [...entriesOf(other)];
 		batched(() => {
 			for (const [key, value] of entries) this.set(key, value);
 		});
@@ -1016,7 +1042,7 @@ export class ObservableMap<K = any, V = any>
 
 	/** Make the entries those of `other`, in its order. */
 	replace(other: MapEntries<K, V>): this {
-		const entries = untracked(() => [...entriesOf(other)]);
+		const entries = [...entriesOf(other)];
 		batched(() => {
 			const wanted = new Map(entries);
 			const before = [...super.keys()];
@@ -1071,7 +1097,8 @@ export class ObservableMap<K = any, V = any>
 		thisArg?: unknown,
 	): void {
 		this.observeAll();
-		super.forEach(fn, thisArg);
+		if (this.dehancer === undefined) super.forEach(fn, thisArg);
+		else for (const [k, v] of this.entries()) fn.call(thisArg, v, k, this);
 	}
 
 	override keys(): MapIterator<K> {
@@ -1081,12 +1108,22 @@ export class ObservableMap<K = any, V = any>
 
 	override values(): MapIterator<V> {
 		this.observeAll();
-		return super.values();
+		const { dehancer } = this;
+		return dehancer === undefined
+			? super.values()
+			: new Map(
+					Array.from(super.entries(), ([k, v]) => [k, dehancer(v)]),
+				).values();
 	}
 
 	override entries(): MapIterator<[K, V]> {
 		this.observeAll();
-		return super.entries();
+		const { dehancer } = this;
+		return dehancer === undefined
+			? super.entries()
+			: new Map(
+					Array.from(super.entries(), ([k, v]) => [k, dehancer(v)]),
+				).entries();
 	}
 
 	override [Symbol.iterator](): MapIterator<[K, V]> {
@@ -1180,6 +1217,9 @@ export class ObservableSet<T = any> extends Set<T> implements Hooks, Named {
 			let dep = this.valueDeps.get(value);
 			if (!dep) {
 				dep = new Dep(undefined, this, value);
+				dep.onUnused = () => {
+					this.valueDeps?.delete(value);
+				};
 				this.valueDeps.set(value, dep);
 			}
 			reportObserved(dep);
@@ -1264,8 +1304,11 @@ export class ObservableSet<T = any> extends Set<T> implements Hooks, Named {
 
 	/** Make the values those of `other`. */
 	replace(other: Iterable<T> | null | undefined): this {
-		const values = untracked(() => (other ? [...other] : []));
 		if (other === null || other === undefined) return this;
+		if (typeof other !== "object") {
+			throw new Error(`sobx: Cannot initialize set from ${other}`);
+		}
+		const values = [...other];
 		batched(() => {
 			this.clear();
 			for (const value of values) this.add(value);
