@@ -14,7 +14,7 @@ import {
 	ObservableSet,
 	observeArray,
 } from "./collections.js";
-import { endBatch, startBatch } from "./core.js";
+import { $sobx, endBatch, startBatch } from "./core.js";
 import {
 	addObservableProperty,
 	administrationOf,
@@ -174,14 +174,20 @@ export function entries(target: object): Array<[unknown, unknown]> {
 // Emitted by @sobx/compiler for property operations on values it knows may be observable. They
 // fall back to the plain JavaScript operation for anything else.
 
+/**
+ * Whether the helpers must handle `target` (an observable array, `ProxyLike`, or observable object
+ * or class); everything else gets the plain operation. Throws, like the plain operation would,
+ * for `null` / `undefined` only when the plain operation is then attempted.
+ */
+const isMarked = (target: unknown): target is object =>
+	target != null && (target as { [$sobx]?: true })[$sobx] !== undefined;
+
 const isObservableObjectLike = (target: object): boolean =>
 	target instanceof ProxyLike || administrationOf(target) !== undefined;
 
 /** `target[key]`, tracked for observable arrays (index / `length`) and missing keys of observable objects. */
 export function getProperty(target: unknown, key: PropertyKey): unknown {
-	if (typeof target !== "object" || target === null) {
-		return (target as AnyRecord)[key];
-	}
+	if (!isMarked(target)) return (target as AnyRecord)[key];
 	if (target instanceof ObservableArray) {
 		if (key === "length") {
 			observeArray(target);
@@ -195,7 +201,7 @@ export function getProperty(target: unknown, key: PropertyKey): unknown {
 
 /** `target[key] = value`, observed for observable arrays and objects (adding new keys). */
 export function setProperty<V>(target: unknown, key: PropertyKey, value: V): V {
-	if (typeof target !== "object" || target === null) {
+	if (!isMarked(target)) {
 		(target as AnyRecord)[key] = value;
 		return value;
 	}
@@ -231,9 +237,7 @@ export function updateProperty(
 
 /** `delete target[key]`, observed for observable arrays and objects. */
 export function deleteProperty(target: unknown, key: PropertyKey): boolean {
-	if (typeof target !== "object" || target === null) {
-		return delete (target as AnyRecord)[key];
-	}
+	if (!isMarked(target)) return delete (target as AnyRecord)[key];
 	if (target instanceof ObservableArray && isIndexKey(key)) {
 		return target.deleteIndex(index(key));
 	}
@@ -246,9 +250,7 @@ export function deleteProperty(target: unknown, key: PropertyKey): boolean {
 
 /** `key in target`, tracked for observable objects (including keys added later) and arrays. */
 export function hasProperty(target: unknown, key: PropertyKey): boolean {
-	if (typeof target !== "object" || target === null) {
-		return key in (target as object);
-	}
+	if (!isMarked(target)) return key in (target as object);
 	if (target instanceof ObservableArray) {
 		observeArray(target);
 		return key in target;
@@ -259,6 +261,7 @@ export function hasProperty(target: unknown, key: PropertyKey): boolean {
 
 /** `Object.keys(target)`, tracked for observable objects (keys added / removed) and arrays. */
 export function keysOf(target: unknown): string[] {
+	if (!isMarked(target)) return Object.keys(target as object);
 	if (target instanceof ProxyLike) {
 		return (target as ProxyLike<AnyRecord>).keys();
 	}
@@ -272,10 +275,12 @@ export function keysOf(target: unknown): string[] {
 
 /** `Object.values(target)`, tracked like {@link keysOf}. */
 export function valuesOf(target: unknown): unknown[] {
+	if (!isMarked(target)) return Object.values(target as object);
 	return keysOf(target).map((key) => getProperty(target, key));
 }
 
 /** `Object.entries(target)`, tracked like {@link keysOf}. */
 export function entriesOf(target: unknown): Array<[string, unknown]> {
+	if (!isMarked(target)) return Object.entries(target as object);
 	return keysOf(target).map((key) => [key, getProperty(target, key)]);
 }

@@ -71,13 +71,16 @@ Runtime comparison (MobX vs the same code compiled by sobx), same workload in `n
 
 | Fixture | MobX (ms) | sobx (ms) | sobx vs MobX |
 |---|---|---|---|
-| combined-reaction-on-name | 359.05 | 101.46 | **253.9% faster** |
-| counter-increment | 351.68 | 69.33 | **407.3% faster** |
-| multiple-reactions | 355.12 | 84.47 | **320.4% faster** |
-| observable-writes-only | 84.08 | 22.41 | **275.1% faster** |
-| sync-effect | 355.07 | 94.03 | **277.6% faster** |
-| plain-code-in-compiled-module | 59.08 | 64.05 | 8.4% slower |
+| combined-reaction-on-name | 347.45 | 99.57 | **248.9% faster** |
+| counter-increment | 340.48 | 72.99 | **366.5% faster** |
+| multiple-reactions | 348.06 | 88.10 | **295.1% faster** |
+| observable-writes-only | 82.76 | 22.66 | **265.3% faster** |
+| sync-effect | 348.79 | 96.21 | **262.5% faster** |
+| plain-code-in-compiled-module | 59.36 | 64.71 | 9.0% slower |
+| plain-code-in-derivation | 60.58 | 66.31 | 9.5% slower |
 
-`plain-code-in-compiled-module` measures what the compiler's rewrites cost on plain values: a loop of index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction. Inside reactions, computeds and observer renders those reads go through the runtime's helpers to be tracked.
+The last two measure what the compiler's rewrites cost on plain values: a loop of index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction and inside an `autorun` (as in an observer render). The MobX column runs the same code uncompiled.
+
+Earlier versions of this table (MobX 460–513 ms, sobx 108–197 ms) ran the fixtures with the APIs as `node:vm` globals, whose lookups are slow; the bench now passes them as local bindings, as a module's imports are. The bigger ratios come from that harness change, not from a faster runtime.
 
 These numbers are with full MobX semantics: tracked dependencies, batching, equality checks. Earlier, faster figures came from an inlined reaction that didn't behave like MobX.

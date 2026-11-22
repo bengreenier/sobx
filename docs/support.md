@@ -11,8 +11,7 @@ deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` reads
 compiled into runtime calls: precisely on the observables the compiler sees created, and on any
 value whose origin it can't trace (a parameter such as React props, an import, a call result such
 as `useContext()`), which may be an observable. Those runtime calls behave as plain JavaScript on
-other values. The one thing the compiler can't do without a `Proxy` is see a dot-syntax read of a
-key that doesn't exist yet (`props.store.later`) on a value it can't trace; see
+other values. What remains is listed under
 [Differences from MobX](#differences-from-mobx). sobx also has an explicit API: `set`, `remove`,
 `has`, `get`, `keys`, `values`, `entries` (same names and semantics as MobX's object API
 functions), for modules the compiler doesn't process.
@@ -130,18 +129,29 @@ observe are compiled to runtime calls:
 
 | Pattern | Compiled to |
 |---|---|
-| `o[k]`, `o[0]`, `o.length` | `getProperty(o, k)`, inside reactions, computeds and observer renders (plain `o[k]` elsewhere: `__sobx_globalState.tracking !== null ? ... : ...`) |
-| `k in o`, `Object.keys` / `values` / `entries(o)` | `hasProperty`, `keysOf`, `valuesOf`, `entriesOf` (likewise only inside derivations) |
-| `o.k = v`, `o[k] = v`, `o.k += v`, `o[k]++`, `o.k ||= v`, `delete o[k]` | `setProperty`, `updateProperty`, `deleteProperty` when `o` is observable (checked inline: `o[$sobx] !== void 0 ? ... : <the original write>`) |
+| `o[k]`, `o[0]`, `o.length` | `getProperty(o, k)` |
+| `k in o`, `Object.keys` / `values` / `entries(o)` | `hasProperty`, `keysOf`, `valuesOf`, `entriesOf` |
+| `o.k = v`, `o[k] = v`, `o.k += v`, `o[k]++`, `o.k ||= v`, `delete o[k]` | `setProperty`, `updateProperty`, `deleteProperty` |
 
-The runtime calls behave exactly as the plain operations on values that aren't observables
-(checked by a differential fuzz test), and plain values skip them, so plain code in a compiled
-module runs at close to its uncompiled speed (`packages/bench`: 8% slower on a loop of nothing but
-such operations). Values known to be plain (literals, local objects and arrays, `new Map()`, ...),
-globals, and observables the compiler sees created are left alone or compiled precisely. Method
-calls (`o[k]()`), optional chains (`o?.[k]`), destructuring targets and compound writes whose
-object or key has side effects are left as they are (no error). Modules that import neither
-`@sobx/magic` nor `@sobx/react` aren't compiled: use the explicit API there.
+The helpers are only called for observables: when the object is a name or a static property
+chain (`items`, `props.items`), the compiled code checks the mark the runtime puts on observables
+inline (`o[$sobx] !== void 0 ? <helper> : <the original operation>`); otherwise, reads take the
+helper only inside reactions, computeds and observer renders
+(`__sobx_globalState.tracking !== null ? ... : ...`), and the helpers' first check is the same
+mark. The runtime calls behave exactly as the plain operations on values that aren't observables
+(checked by a differential fuzz test, in and outside derivations).
+
+Cost on plain values (`packages/bench`, a loop of nothing but index / `length` reads,
+dynamic-key writes and `Object.keys` on plain data reached through parameters): 9% slower
+outside derivations, 10% slower inside one (as in an observer render). Output size: the React
+example spec (`packages/react/src/react.compiled.spec.tsx`, dense with store operations) grows
+26% minified, 15% gzipped, including the rewrites of observables the compiler sees.
+
+Values known to be plain (literals, and local objects and arrays whose contents are all plain,
+`new Map()`, ...), globals, and observables the compiler sees created are left alone or compiled
+precisely. Method calls (`o[k]()`), optional chains (`o?.[k]`), destructuring targets and compound
+writes whose object or key has side effects are left as they are (no error). Modules that import
+neither `@sobx/magic` nor `@sobx/react` aren't compiled: use the explicit API there.
 
 ## Reactivity
 
@@ -166,11 +176,17 @@ sobx (added / deleted keys, `in`, `Object.keys`, dynamic keys, array index / `le
 nested writes). Both check that the logged values match. Known differences:
 
 - No `Proxy`. Two things follow:
-  - A dot-syntax read of a key that doesn't exist yet (`props.store.later`, where `later` is added
-    afterwards) is only tracked when the compiler sees the observable created (it then knows the
-    declared keys). Through a value it can't trace, such a read isn't tracked: read it with
-    `get(o, "later")`, or declare the key up front. Without a `Proxy`, a property that doesn't
-    exist can't be observed; this is inherent.
+  - A dot-syntax read of a key that doesn't exist yet (`o.later`, added afterwards) is only
+    tracked when the compiler sees the observable created (it then knows the declared keys).
+    Through a value it can't trace, it isn't: read it with `get(o, "later")`, or declare the key
+    up front. For props and context this is inherent without a `Proxy`. For imported observables
+    it isn't implemented (the compiler doesn't analyze the exporting module). Either way it only
+    matters for an object nothing holds through an observable property: for `store.tags.later`,
+    adding `later` notifies whatever read `store.tags`, so the read re-runs anyway.
+  - On values the compiler can't trace, `Object.assign(o, ...)` into them, `{ ...o }`,
+    `for...in`, `JSON.stringify(o)` and `Object.getOwnPropertyNames(o)` don't see keys added
+    later (use `keys(o)` / `toJS(o)` in derivations), and a plain local that is later given an
+    observable (`const acc = {}; acc.s = props.store; acc.s[k] = 1`) is still treated as plain.
   - Modules that import neither `@sobx/magic` nor `@sobx/react` aren't compiled, so the
     operations above aren't observed there: use the explicit API (`set`, `remove`, `has`,
     `keys`, `get`, `array.set(i, v)`, `array.setLength(n)`).

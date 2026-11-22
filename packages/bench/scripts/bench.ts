@@ -16,7 +16,7 @@ import generate from "@babel/generator";
 import { parse } from "@babel/parser";
 import { transformSobx } from "@sobx/compiler";
 import * as sobxRuntime from "@sobx/runtime";
-import { configure, observable, reaction, runInAction } from "mobx";
+import { autorun, configure, observable, reaction, runInAction } from "mobx";
 
 configure({ enforceActions: "always" });
 
@@ -113,6 +113,7 @@ function runMobX(basename: string, iterations: number): number {
 		stripMobxImport(loadBenchSource(basename)),
 	);
 	return runScript(source, {
+		autorun,
 		observable,
 		reaction,
 		runInAction,

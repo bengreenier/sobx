@@ -51,7 +51,7 @@ Also:
 
 - **`untracked(fn)`**, **`batch(fn)`**.
 - **`currentTracking()`**: an opaque object identifying the derivation run in progress (or `null`), for bindings such as `@sobx/react`.
-- Compiler helpers (emitted by `@sobx/compiler`; plain JavaScript semantics for non-observables): `getProperty`, `setProperty`, `updateProperty`, `deleteProperty`, `hasProperty`, `keysOf`, `valuesOf`, `entriesOf`.
+- Compiler helpers (emitted by `@sobx/compiler`; plain JavaScript semantics for non-observables): `getProperty`, `setProperty`, `updateProperty`, `deleteProperty`, `hasProperty`, `keysOf`, `valuesOf`, `entriesOf`. Compiled code also reads `globalState` (whether a derivation is running) and `$sobx` (the mark on observable arrays, `ProxyLike`s and observable objects): internal, don't modify them.
 - **`ProxyLike`**: see below.
 
 ## `ProxyLike`

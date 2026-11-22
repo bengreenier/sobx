@@ -344,6 +344,8 @@ export interface RewriteState {
 	mode: "normal" | "tracked" | "plain";
 	/** A write being emitted as the original operation (the plain branch of {@link markedWrite}). */
 	plainWrite: t.Node | null;
+	/** A read being emitted as the original operation (the plain branch of {@link trackingRead}). */
+	plainRead: t.Node | null;
 }
 
 export function newRewriteState(): RewriteState {
@@ -355,6 +357,7 @@ export function newRewriteState(): RewriteState {
 		uncompiled: [],
 		mode: "normal",
 		plainWrite: null,
+		plainRead: null,
 	};
 }
 
@@ -415,10 +418,32 @@ function withMode<T>(
  */
 function trackingRead(
 	node: t.Node,
+	target: t.Node,
 	plan: CompilePlan,
 	state: RewriteState,
 	tracked: () => t.Expression,
 ): t.Expression {
+	// `items`, `props.items`, `this.rows`: check the observable mark inline, as writes do, so
+	// plain values skip the helper inside derivations too. (Only for such simple objects, so the
+	// object isn't duplicated with conditionals of its own.)
+	if (isSimpleObject(target)) {
+		state.helpers.add("$sobx");
+		const object = t.cloneNode(rewrite(target, plan, state) as t.Expression);
+		const test = t.binaryExpression(
+			"!==",
+			t.memberExpression(object, t.identifier(helperName("$sobx")), true),
+			t.unaryExpression("void", t.numericLiteral(0)),
+		);
+		const helpers = tracked();
+		const outer = state.plainRead;
+		state.plainRead = node;
+		try {
+			const plain = rewrite(node, plan, state) as t.Expression;
+			return t.conditionalExpression(test, helpers, plain);
+		} finally {
+			state.plainRead = outer;
+		}
+	}
 	if (state.mode === "tracked") return tracked();
 	state.helpers.add("globalState");
 	const test = t.binaryExpression(
@@ -436,6 +461,18 @@ function trackingRead(
 		() => rewrite(node, plan, state) as t.Expression,
 	);
 	return t.conditionalExpression(test, helpers, plain);
+}
+
+/** A name, `this`, or a chain of static property reads of one (`props.items`), but not `x.length`. */
+function isSimpleObject(node: t.Node): boolean {
+	if (t.isIdentifier(node) || t.isThisExpression(node)) return true;
+	return (
+		t.isMemberExpression(node) &&
+		!node.computed &&
+		t.isIdentifier(node.property) &&
+		node.property.name !== "length" &&
+		isSimpleObject(node.object)
+	);
 }
 
 /** Local name of an injected runtime helper. */
@@ -668,10 +705,10 @@ export function rewriteMatch(
 				values: "valuesOf",
 				entries: "entriesOf",
 			}[callee.property.name];
-			if (name && state.mode !== "plain") {
+			if (name && state.mode !== "plain" && state.plainRead !== node) {
 				consume(node);
 				const [target] = node.arguments;
-				return trackingRead(node, plan, state, () =>
+				return trackingRead(node, target as t.Node, plan, state, () =>
 					helper(state, name, [r(target)]),
 				);
 			}
@@ -712,11 +749,12 @@ export function rewriteMatch(
 		t.isExpression(node.object) &&
 		plan.propertyReads.has(spanKey(node)) &&
 		state.mode !== "plain" &&
+		state.plainRead !== node &&
 		!t.isPrivateName(node.property)
 	) {
 		consume(node);
 		const object = node.object;
-		return trackingRead(node, plan, state, () =>
+		return trackingRead(node, object, plan, state, () =>
 			helper(state, "getProperty", [
 				r(object),
 				memberKey(node, r) as t.Expression,
@@ -741,11 +779,12 @@ export function rewriteMatch(
 		node.operator === "in" &&
 		plan.operations.has(spanKey(node)) &&
 		t.isExpression(node.left) &&
-		state.mode !== "plain"
+		state.mode !== "plain" &&
+		state.plainRead !== node
 	) {
 		consume(node);
 		const { left, right } = node;
-		return trackingRead(node, plan, state, () =>
+		return trackingRead(node, right, plan, state, () =>
 			helper(state, "hasProperty", [r(right), r(left as t.Expression)]),
 		);
 	}

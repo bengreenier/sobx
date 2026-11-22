@@ -1,6 +1,7 @@
 //! The sobx analyzer, built on oxc_parser + oxc_semantic. Produces the IR described by
 //! `@sobx/ast` (`packages/ast/src/types.ts`).
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::{AstKind, ast::*};
@@ -169,6 +170,8 @@ pub struct Analyzer<'s, 'a> {
     /// Calls of `@sobx/react`'s local observable hooks, and which hook.
     hook_calls: Vec<(NodeId, &'static str)>,
     untraced: Vec<ir::UntracedOperation>,
+    /// Memoized [`Self::untraced_symbol`].
+    untraced_symbols: RefCell<HashMap<SymbolId, bool>>,
 }
 
 impl<'s, 'a> Analyzer<'s, 'a> {
@@ -215,6 +218,7 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             fn_info: HashMap::new(),
             hook_calls: vec![],
             untraced: vec![],
+            untraced_symbols: RefCell::new(HashMap::new()),
         }
     }
 
@@ -2633,6 +2637,15 @@ impl<'s, 'a> Analyzer<'s, 'a> {
     /// Whether a binding's value can't be traced: parameters, imports (other than the APIs),
     /// variables initialized from anything but a fresh value, or reassigned.
     fn untraced_symbol(&self, symbol: SymbolId) -> bool {
+        if let Some(&known) = self.untraced_symbols.borrow().get(&symbol) {
+            return known;
+        }
+        let untraced = self.compute_untraced_symbol(symbol);
+        self.untraced_symbols.borrow_mut().insert(symbol, untraced);
+        untraced
+    }
+
+    fn compute_untraced_symbol(&self, symbol: SymbolId) -> bool {
         let decl = self.scoping.symbol_declaration(symbol);
         match self.kind(decl) {
             AstKind::ImportSpecifier(_) | AstKind::ImportDefaultSpecifier(_) | AstKind::ImportNamespaceSpecifier(_) => {
@@ -2645,13 +2658,11 @@ impl<'s, 'a> Analyzer<'s, 'a> {
             AstKind::Function(_) | AstKind::Class(_) => false,
             AstKind::VariableDeclarator(d) => {
                 let simple = matches!(&d.id, BindingPattern::BindingIdentifier(b) if b.symbol_id() == symbol);
-                let fresh = d.init.as_ref().is_some_and(|init| is_fresh_value(init, self.scoping));
-                let reassigned = self
-                    .scoping
-                    .get_resolved_reference_ids(symbol)
-                    .iter()
-                    .any(|r| self.scoping.get_reference(*r).is_write());
-                !(simple && fresh && !reassigned)
+                if !simple || !d.init.as_ref().is_some_and(|init| is_fresh_value(init, self.scoping)) {
+                    return true;
+                }
+                // Plain unless reassigned.
+                self.scoping.get_resolved_reference_ids(symbol).iter().any(|r| self.scoping.get_reference(*r).is_write())
             }
             _ => true,
         }
@@ -3059,13 +3070,22 @@ fn object_literal<'a>(expr: &'a Expression<'a>) -> Option<&'a ObjectExpression<'
     }
 }
 
-/// Whether `expr` makes a new value that can't be an observable (a literal, a function, a
-/// built-in object...).
+/// Whether `expr` makes a new value that can't be an observable and holds none (a literal, a
+/// function, a built-in object...). Object and array literals count only if everything in them
+/// does (`{ store: props.store }` holds a value that may be an observable).
 fn is_fresh_value(expr: &Expression, scoping: &Scoping) -> bool {
     match expr {
-        Expression::ObjectExpression(_)
-        | Expression::ArrayExpression(_)
-        | Expression::StringLiteral(_)
+        Expression::ObjectExpression(o) => o.properties.iter().all(|p| match p {
+            ObjectPropertyKind::ObjectProperty(p) => is_fresh_value(&p.value, scoping),
+            ObjectPropertyKind::SpreadProperty(s) => is_fresh_value(&s.argument, scoping),
+        }),
+        Expression::ArrayExpression(a) => a.elements.iter().all(|e| match e {
+            ArrayExpressionElement::SpreadElement(s) => is_fresh_value(&s.argument, scoping),
+            ArrayExpressionElement::Elision(_) => true,
+            other => other.as_expression().is_some_and(|e| is_fresh_value(e, scoping)),
+        }),
+        Expression::UnaryExpression(_) | Expression::BinaryExpression(_) => true,
+        Expression::StringLiteral(_)
         | Expression::NumericLiteral(_)
         | Expression::BooleanLiteral(_)
         | Expression::NullLiteral(_)

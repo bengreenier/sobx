@@ -164,8 +164,24 @@ function f(k, o) {
   b[k];
   const { c } = p;
   c[k];
+  const ctx = { store: p.store, n: 1 };
+  ctx.store[k] = 1;
+  const rows = [p.items];
+  rows[0][k];
+  const copy = { ...p };
+  copy[k];
+  const plain = { n: 1, list: [1, "a", -1, typeof k], nested: { s: \`\${k}\` } };
+  plain[k];
 }`),
-		).toEqual(["read a[k]", "read b[k]", "read c[k]"]);
+		).toEqual([
+			"read a[k]",
+			"read b[k]",
+			"read c[k]",
+			"write ctx.store[k]",
+			"read rows[0]",
+			"read rows[0][k]",
+			"read copy[k]",
+		]);
 	});
 });
 
