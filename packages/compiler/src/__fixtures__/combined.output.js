@@ -1,6 +1,6 @@
-import { observable, reaction } from "mobx";
+import { observable, reaction } from "@sobx/runtime";
 // Multiple features in one file: observable, reads, writes, reaction
-import { ProxyLike } from "@sobx/core";
+import { ProxyLike } from "@sobx/runtime";
 const store = new ProxyLike({
   count: 0,
   name: ""
@@ -8,11 +8,4 @@ const store = new ProxyLike({
 function increment() {
   store.set("count", store.get("count") + 1);
 }
-(() => {
-  const __d = [];
-  __d.push(store.addObserver("name", (_k, _prev, curr) => (name => console.log("name:", name))(curr)));
-  (name => console.log("name:", name))((() => store.get("name"))());
-  return () => {
-    __d.forEach(x => x.dispose());
-  };
-})();
+reaction(() => store.get("name"), name => console.log("name:", name));

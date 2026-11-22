@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  js:
+    name: Lint, build, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # @sobx/compiler needs its native analyzer (no prebuilt binaries are published yet).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sobx/compiler build:native
+      - run: pnpm lint
+      - run: pnpm build
+      - run: pnpm test
+
+  native:
+    # Builds the Rust analyzer (crates/sobx_compiler) on every OS and runs the compiler's tests
+    # against it: the analyzer specs, a longer invariant fuzz, and the compile tests.
+    name: Native analyzer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: pnpm --filter @sobx/compiler build:native
+      - run: pnpm --filter "@sobx/compiler..." build
+      - name: Analyzer specs, fuzz, and compile tests
+        run: pnpm --filter @sobx/compiler exec vitest run --project node
+        env:
+          SOBX_FUZZ_SEEDS: "3000"

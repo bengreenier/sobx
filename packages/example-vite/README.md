@@ -1,3 +1,5 @@
 # example-vite
 
 Example app using the sobx compiler with **Vite**. Run `pnpm dev` or `pnpm build` from the repo root or from this package.
+
+The source imports from `@sobx/magic`, so the build output is compiled to `@sobx/runtime` (no MobX). Building needs the native analyzer: run `pnpm --filter @sobx/compiler build:native` first (requires a Rust toolchain).

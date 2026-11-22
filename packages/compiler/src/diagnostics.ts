@@ -1,0 +1,177 @@
+import type { DiagnosticCode, Options, SobxModule, Span } from "@sobx/ast";
+import { type CompilePlan, spanKey } from "./plan.js";
+
+/** Codes the compiler adds on top of the analyzer's. */
+export type CompilerDiagnosticCode =
+	/** An option the runtime doesn't implement. */
+	| "unsupported-option"
+	/** An observable left to the runtime (accessor-based) instead of the `ProxyLike` fast path. */
+	| "runtime-observable"
+	/** A write to an observable that couldn't be compiled (observed by its proxy, unless `useProxies: "never"`). */
+	| "uncompiled-write";
+
+export type CompileDiagnosticCode = DiagnosticCode | CompilerDiagnosticCode;
+export type CompileSeverity = "error" | "warning" | "info";
+
+export interface CompileDiagnostic {
+	code: CompileDiagnosticCode;
+	severity: CompileSeverity;
+	message: string;
+	span: Span;
+}
+
+/** Per-code severity overrides; `"off"` drops the diagnostic. */
+export type DiagnosticsConfig = Partial<
+	Record<CompileDiagnosticCode, CompileSeverity | "off">
+>;
+
+/**
+ * Default severity of each code when compiling. The runtime implements the API, so most of
+ * what the analyzer can't model still works (it just doesn't get the fast path). Errors are
+ * what would behave differently from MobX or fail at runtime.
+ */
+export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
+	{
+		// Would fail at runtime.
+		"unknown-import": "error",
+		"default-import": "error",
+		"unsupported-api": "error",
+		"invalid-arguments": "error",
+		"deep-mutation": "warning",
+		"invalid-annotation": "error",
+		"unknown-annotation-key": "error",
+		"missing-annotations": "error",
+		"unsupported-option": "error",
+		// Probably mistakes.
+		"write-in-derivation": "warning",
+		"after-await": "warning",
+		// Handled by the runtime.
+		"namespace-import": "info",
+		"api-not-called": "info",
+		"unresolved-arguments": "info",
+		"unbound-observable": "info",
+		"observable-escape": "info",
+		"dynamic-key": "info",
+		"unsupported-operation": "info",
+		"opaque-function": "info",
+		"observable-reassigned": "info",
+		"untracked-nested-read": "info",
+		"unsupported-target": "info",
+		"make-observable-outside-constructor": "info",
+		"unresolved-import": "info",
+		"runtime-observable": "info",
+		"uncompiled-write": "info",
+		"opaque-observable": "info",
+	};
+
+/** Options the runtime implements, per API. */
+const SUPPORTED_OPTIONS = {
+	reaction: [
+		"fireImmediately",
+		"equals",
+		"name",
+		"delay",
+		"scheduler",
+		"onError",
+		"requiresObservable",
+		"signal",
+	],
+	autorun: [
+		"name",
+		"delay",
+		"scheduler",
+		"onError",
+		"requiresObservable",
+		"signal",
+	],
+	when: ["timeout", "name", "onError", "signal"],
+	computed: [
+		"equals",
+		"name",
+		"keepAlive",
+		"set",
+		"get",
+		"context",
+		"requiresReaction",
+	],
+	observable: ["autoBind", "deep", "name", "proxy", "defaultDecorator"],
+	"observable.array": ["deep", "name", "proxy", "defaultDecorator"],
+	"observable.box": ["equals", "deep", "name", "defaultDecorator"],
+	"observable.map": ["deep", "name", "defaultDecorator"],
+	"observable.set": ["deep", "name", "defaultDecorator"],
+} as const;
+
+/** The compile diagnostics for a module: the analyzer's, re-graded, plus the compiler's own. */
+export function compileDiagnostics(
+	mod: SobxModule,
+	plan: CompilePlan,
+	config: DiagnosticsConfig = {},
+): CompileDiagnostic[] {
+	const out: CompileDiagnostic[] = [];
+	const push = (code: CompileDiagnosticCode, message: string, span: Span) => {
+		const severity = config[code] ?? DEFAULT_SEVERITY[code];
+		if (severity === "off") return;
+		out.push({ code, severity, message, span });
+	};
+
+	for (const d of mod.diagnostics) {
+		const rewritable =
+			d.code === "dynamic-key" || d.code === "unsupported-operation";
+		// Rewritten to runtime helpers that are observed.
+		if (rewritable && plan.rewritten.has(spanKey(d.span))) continue;
+		push(d.code, d.message, d.span);
+	}
+	for (const u of plan.uncompiled) push("uncompiled-write", u.message, u.span);
+
+	const checkOptions = (
+		api: keyof typeof SUPPORTED_OPTIONS,
+		options: Options | null,
+		span: Span,
+	) => {
+		if (options?.kind !== "object") return;
+		const supported: readonly string[] = SUPPORTED_OPTIONS[api];
+		for (const key of Object.keys(options.entries)) {
+			if (!supported.includes(key)) {
+				push(
+					"unsupported-option",
+					`The "${key}" option of ${api}() is not supported by @sobx/runtime.`,
+					span,
+				);
+			}
+		}
+	};
+	for (const r of mod.reactions) checkOptions(r.api, r.options, r.span);
+	for (const c of mod.computeds) checkOptions("computed", c.options, c.span);
+	for (const o of mod.observables) {
+		const kind = o.shape.kind;
+		checkOptions(
+			kind === "array" || kind === "box" || kind === "map" || kind === "set"
+				? `observable.${kind}`
+				: "observable",
+			o.options,
+			o.span,
+		);
+	}
+
+	for (const o of mod.observables) {
+		const reason = plan.fallbacks.get(o.id);
+		if (reason && o.target === "object" && o.source === "observable") {
+			push(
+				"runtime-observable",
+				`Not compiled to the ProxyLike fast path (${reason}); made observable at runtime instead.`,
+				o.span,
+			);
+		}
+	}
+
+	return out.sort((a, b) => a.span.start - b.span.start);
+}
+
+/** `file:line:col - severity code: message`. */
+export function formatDiagnostic(
+	d: CompileDiagnostic,
+	filename = "<input>",
+): string {
+	const { line, column } = d.span.loc.start;
+	return `${filename}:${line}:${column + 1} - ${d.severity} ${d.code}: ${d.message}`;
+}

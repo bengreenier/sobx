@@ -14,7 +14,7 @@ function compile(source: string, options?: TransformSobxOptions): string {
 		sourceType: "module",
 		plugins: ["typescript"],
 	});
-	const { ast: transformed } = transformSobx(ast.program, options);
+	const { ast: transformed } = transformSobx(ast.program, source, options);
 	return generate(transformed).code;
 }
 
@@ -48,7 +48,7 @@ describe("transformSobx", () => {
 		expect(output.trim()).toBe(expected.trim());
 	});
 
-	it("reaction: compiles reaction() to addObserver + initial effect", () => {
+	it("reaction: redirects reaction() to the runtime", () => {
 		const input = loadFixture("reaction");
 		const expected = loadFixture("reaction", "output");
 		const output = compile(input, FIXTURE_OPTIONS);
@@ -102,8 +102,8 @@ reaction(() => store.count, (n) => console.log(n));`;
 		const input = `import { observable } from "my-sobx";
 const state = observable({ n: 0 });`;
 		const output = compile(input, { moduleSpecifier: "my-sobx" });
-		expect(output).toContain('from "my-sobx"');
-		expect(output).toContain("ProxyLike");
+		expect(output).toContain('from "@sobx/runtime"');
+		expect(output).not.toContain("my-sobx");
 		expect(output).toContain("new ProxyLike({");
 	});
 });

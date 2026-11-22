@@ -19,12 +19,12 @@
 		"build": "node build.mjs"
 	},
 	"dependencies": {
-		"@sobx/core": "workspace:*"
+		"@sobx/magic": "workspace:*",
+		"@sobx/runtime": "workspace:*"
 	},
 	"devDependencies": {
 		"@sobx/compiler": "workspace:*",
 		"esbuild": "^0.28.1",
-		"mobx": "^6.16.1",
 		"typescript": "^6.0.3"
 	}
 }

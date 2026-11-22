@@ -1,14 +1,7 @@
-import { observable, reaction } from "mobx";
+import { observable, reaction } from "@sobx/runtime";
 // MobX-style: reaction() should become addObserver + initial effect
-import { ProxyLike } from "@sobx/core";
+import { ProxyLike } from "@sobx/runtime";
 const state = new ProxyLike({
   x: 0
 });
-(() => {
-  const __d = [];
-  __d.push(state.addObserver("x", (_k, _prev, curr) => (val => console.log(val))(curr)));
-  (val => console.log(val))((() => state.get("x"))());
-  return () => {
-    __d.forEach(x => x.dispose());
-  };
-})();
+reaction(() => state.get("x"), val => console.log(val));

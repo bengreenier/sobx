@@ -2,17 +2,20 @@
 
 **Not production-ready.** This package is in alpha (version includes an `-alpha` suffix). Do not use in production until a stable release.
 
-Compiles sobx usage: rewrites `observable`, `reaction`, and `runInAction` imported from a configurable module (default `"sobx"`) into code that uses `@sobx/core`. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack.
+Compiles MobX-style code written against `@sobx/magic` (or another configured module) to run on `@sobx/runtime`, with local observable objects compiled to explicit `get` / `set` calls. Plugins are provided for Vite, Rollup, Webpack, esbuild, Rolldown, and Rspack. See [what's supported](../../docs/support.md).
 
 ## Install
 
 ```bash
-pnpm add @sobx/compiler
+pnpm add -D @sobx/compiler
+pnpm add @sobx/magic @sobx/runtime
 ```
+
+Compiled code imports `@sobx/runtime`, so it must be a (non-dev) dependency of your app.
 
 ## Bundler plugins
 
-Each entry exports a `sobxCompiler(options?)` function. Only files that import from the configured module (default `"sobx"`) are transformed.
+Each entry exports a `sobxCompiler(options?)` function. Only files that import from the configured module (default `"@sobx/magic"`) are transformed.
 
 | Package subpath   | Use with   |
 |-------------------|------------|
@@ -28,7 +31,10 @@ Each entry exports a `sobxCompiler(options?)` function. Only files that import f
 
 - **`include`** — Pattern(s) for files to transform. Default: `/\.[jt]sx?$/`
 - **`exclude`** — Pattern(s) to skip. Always merged with `/node_modules/` (parsing deps via Babel is very slow).
-- **`moduleSpecifier`** — Module to treat as sobx (only transform imports from here). Default: `"sobx"`
+- **`moduleSpecifier`** — Module to treat as sobx (only transform imports from here). Default: `"@sobx/magic"`
+- **`diagnostics`** — Per-code severity overrides, e.g. `{ "deep-mutation": "warning" }`. `"error"` fails the build, `"warning"` is logged, `"info"` and `"off"` are silent. Defaults are in `DEFAULT_SEVERITY`.
+
+Decorators are parsed and left as they are; your bundler must transform them: standard ones (`@observable accessor x`) for your target (for example esbuild with `target: "es2022"`), legacy ones (`@observable x`, with `makeObservable(this)`) with TypeScript's `experimentalDecorators` (either setting of `useDefineForClassFields` works).
 
 ### Vite
 
@@ -94,19 +100,44 @@ export default {
 };
 ```
 
+## How it works
+
+1. **Analyze.** Each file that mentions the module specifier is analyzed by the sobx analyzer, a native (Rust / [oxc](https://oxc.rs)) addon that produces the IR described by [`@sobx/ast`](../ast).
+2. **Report.** The analyzer's diagnostics are re-graded for compiling, and the compiler adds its own (unknown options, observables left to the runtime). Errors are what would fail at runtime; they fail the build, with every error listed (`file:line:col - error code: message`). Likely mistakes are warnings, which are logged. What the analyzer can't see (annotations or options from a variable, escaping observables...) is info: it works, through the runtime.
+3. **Rewrite.**
+   - Imports from the module specifier are redirected to `@sobx/runtime`, which implements MobX's whole API. All of its exports are known to the analyzer, and can be used anywhere; types can be imported without `import type`.
+   - Local `observable({...})` objects whose every use can be rewritten (the fast path) become a `ProxyLike`: reads become `s.get("k")`, writes `s.set("k", v)`, `++` / `--` `s.update(...)`, `delete` `s.delete(...)`, destructuring and method calls (`s.get("m").call(s)`) too, and `this.k` inside their methods; getters become cached computeds. Everything else (exported or escaping objects, dynamic keys, classes, ...) is left to the runtime, which puts it behind a `Proxy`.
+   - On the observables it sees created that aren't on the fast path, undeclared and dynamic keys, `delete`, `in`, `Object.keys` / `values` / `entries`, array index and `length`, and writes through nested values become direct runtime calls (`getProperty`, `setProperty`, `deleteProperty`, `hasProperty`, `keysOf`...). Their `Proxy` observes them anyway; with `configure({ useProxies: "never" })`, these calls do. What can't be rewritten is an info diagnostic (`unsupported-operation`, `uncompiled-write`).
+   - Nothing else is touched: code that only uses parameters, imports, plain data... is output as it is.
+
+Names are resolved through scopes, so a parameter or local variable that shadows an observable, or a function named `observable` that isn't imported from the API module, is left alone.
+
+### Native analyzer
+
+The analyzer is loaded from, in order:
+
+1. the path in `SOBX_NATIVE_PATH`, if set;
+2. `sobx-compiler.node` in the package root (a local build);
+3. the prebuilt `@sobx/compiler-<platform>` package. These aren't published yet.
+
+To build it from source (requires a Rust toolchain):
+
+```bash
+pnpm --filter @sobx/compiler build:native   # writes sobx-compiler.node (git-ignored, not published)
+```
+
 ## Programmatic API
 
-For custom pipelines you can use the transform and transformer APIs:
-
-- **`transformSobx(code, options?)`** — Transform source code. Options include `moduleSpecifier` and filename.
-- **`collectObservableBindings(program, moduleSpecifier?)`** — Collect observable bindings from an AST.
-- **`getSobxImportLocalNames(program, moduleSpecifier?)`** — Get local names for sobx imports.
-- **`buildReactionExpression`, `ensureImports`, `getMemberKey`** — Helpers used by the compiler.
-- Individual transformers: `ObservableTransformer`, `ReactionTransformer`, `MemberExpressionTransformer`, `AssignmentExpressionTransformer`, `ImportInjectionTransformer`.
-
-See type definitions in the package for details.
+- **`transformSobx(program, source, options?)`**: compile a Babel `Program`. `source` must be the text it was parsed from, since nodes are matched to the analysis by offset. Returns `{ ast, diagnostics, needsProxyLike }`; it doesn't throw on error diagnostics. Options: `moduleSpecifier`, `filename`, `diagnostics`.
+- **`analyze(source, options?)`**: run the native analyzer and return the module's IR (`SobxModule`).
+- **`compileUnit(program, source, options?)`**: the plan and diagnostics for a module, without rewriting.
+- **`compileDiagnostics`**, **`formatDiagnostic`**, **`DEFAULT_SEVERITY`**, **`SobxCompileError`**: diagnostics helpers.
+- **`SobxTransformer(options?)`** and **`PARSER_PLUGINS`**: the unplugin-ast transformer used by the bundler plugins, and the Babel parser plugins it needs.
 
 ## Development
 
-The transform fixtures in `src/__fixtures__` import from `"mobx"` (and tests pass `moduleSpecifier: "mobx"`) to avoid a circular dependency on the `sobx` package.
+The transform fixtures in `src/__fixtures__` import from `"mobx"` (and tests pass `moduleSpecifier: "mobx"`) to avoid a circular dependency on the `@sobx/magic` package. The tests need the native analyzer built (`pnpm --filter @sobx/compiler build:native`).
 
+The analyzer's own tests are in `src/analyzer`: specs that assert on the IR for each pattern, and an invariant fuzz (`fuzz.spec.ts`; `SOBX_FUZZ_SEEDS` sets the number of generated programs, 400 by default).
+
+The compile tests run compiled code and compare it with MobX: `compile.spec.ts` (the API), `values.spec.ts` (reading and writing observables however they're reached) and `mobx-api.spec.ts` (every MobX export; legacy and standard decorators, compiled with esbuild). They use the built `@sobx/runtime`, so build it first (`pnpm build`).

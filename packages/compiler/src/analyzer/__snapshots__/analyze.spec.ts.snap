@@ -1,0 +1,917 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`analyze: fixtures > combined.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Write",
+      "observable": "observable:0",
+      "operator": "=",
+      "readsPrevious": false,
+      "receiver": "binding",
+      "span": "6:1-6:12",
+    },
+    {
+      "called": false,
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:1",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "6:15-6:26",
+      "via": "member",
+    },
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:0",
+        "kind": "tracked",
+      },
+      "id": "access:2",
+      "key": {
+        "kind": "static",
+        "name": "name",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "9:15-9:25",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "combined.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+    {
+      "api": "reaction",
+      "imported": "reaction",
+      "kind": "NamedImport",
+      "local": "reaction",
+      "span": "1:21-1:29",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "store",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:27-3:35",
+            "static": false,
+            "valueKind": "primitive",
+          },
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "name",
+            "memberKind": "field",
+            "span": "3:37-3:45",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:48",
+      "target": "object",
+    },
+  ],
+  "reactions": [
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "9:9-9:25",
+      },
+      "dependencies": [
+        "access:2",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "9:27-9:63",
+      },
+      "id": "reaction:0",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "9:0-9:64",
+    },
+  ],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > mobx-counter.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:0",
+        "kind": "tracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "4:15-4:28",
+      "via": "member",
+    },
+    {
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:1",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Write",
+      "observable": "observable:0",
+      "operator": "=",
+      "readsPrevious": false,
+      "receiver": "binding",
+      "span": "5:0-5:13",
+    },
+    {
+      "called": false,
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:2",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "5:16-5:29",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "mobx-counter.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+    {
+      "api": "reaction",
+      "imported": "reaction",
+      "kind": "NamedImport",
+      "local": "reaction",
+      "span": "1:21-1:29",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "counter",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:29-3:37",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:16-3:40",
+      "target": "object",
+    },
+  ],
+  "reactions": [
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "4:9-4:28",
+      },
+      "dependencies": [
+        "access:0",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "4:30-4:51",
+      },
+      "id": "reaction:0",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "4:0-4:52",
+    },
+  ],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > mobx-multiple-reactions.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:0",
+        "kind": "tracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "4:15-4:26",
+      "via": "member",
+    },
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:1",
+        "kind": "tracked",
+      },
+      "id": "access:1",
+      "key": {
+        "kind": "static",
+        "name": "name",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "5:15-5:25",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "mobx-multiple-reactions.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+    {
+      "api": "reaction",
+      "imported": "reaction",
+      "kind": "NamedImport",
+      "local": "reaction",
+      "span": "1:21-1:29",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "store",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:27-3:35",
+            "static": false,
+            "valueKind": "primitive",
+          },
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "name",
+            "memberKind": "field",
+            "span": "3:37-3:45",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:48",
+      "target": "object",
+    },
+  ],
+  "reactions": [
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "4:9-4:26",
+      },
+      "dependencies": [
+        "access:0",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "4:28-4:59",
+      },
+      "id": "reaction:0",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "4:0-4:60",
+    },
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "5:9-5:25",
+      },
+      "dependencies": [
+        "access:1",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "5:27-5:63",
+      },
+      "id": "reaction:1",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "5:0-5:64",
+    },
+  ],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > mobx-sync-effect.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:0",
+        "kind": "tracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "value",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "4:15-4:26",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "mobx-sync-effect.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+    {
+      "api": "reaction",
+      "imported": "reaction",
+      "kind": "NamedImport",
+      "local": "reaction",
+      "span": "1:21-1:29",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "state",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "value",
+            "memberKind": "field",
+            "span": "3:27-3:36",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:39",
+      "target": "object",
+    },
+  ],
+  "reactions": [
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "4:9-4:26",
+      },
+      "dependencies": [
+        "access:0",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "4:28-4:68",
+      },
+      "id": "reaction:0",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "4:0-4:69",
+    },
+  ],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > observable.input.ts 1`] = `
+{
+  "accesses": [],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "observable.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "state",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:27-3:35",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:38",
+      "target": "object",
+    },
+  ],
+  "reactions": [],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > property-read.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "called": false,
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "4:12-4:23",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "property-read.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "state",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:27-3:35",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:38",
+      "target": "object",
+    },
+  ],
+  "reactions": [],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > property-write.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "context": {
+        "kind": "untracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "count",
+      },
+      "kind": "Write",
+      "observable": "observable:0",
+      "operator": "=",
+      "readsPrevious": false,
+      "receiver": "binding",
+      "span": "4:0-4:11",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "property-write.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "state",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "count",
+            "memberKind": "field",
+            "span": "3:27-3:35",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:38",
+      "target": "object",
+    },
+  ],
+  "reactions": [],
+  "unsupported": [],
+}
+`;
+
+exports[`analyze: fixtures > reaction.input.ts 1`] = `
+{
+  "accesses": [
+    {
+      "called": false,
+      "context": {
+        "by": "reaction:0",
+        "kind": "tracked",
+      },
+      "id": "access:0",
+      "key": {
+        "kind": "static",
+        "name": "x",
+      },
+      "kind": "Read",
+      "observable": "observable:0",
+      "path": [],
+      "receiver": "binding",
+      "span": "4:15-4:22",
+      "via": "member",
+    },
+  ],
+  "actions": [],
+  "computeds": [],
+  "diagnostics": [],
+  "filename": "reaction.input.ts",
+  "imports": [
+    {
+      "api": "observable",
+      "imported": "observable",
+      "kind": "NamedImport",
+      "local": "observable",
+      "span": "1:9-1:19",
+    },
+    {
+      "api": "reaction",
+      "imported": "reaction",
+      "kind": "NamedImport",
+      "local": "reaction",
+      "span": "1:21-1:29",
+    },
+  ],
+  "irVersion": 4,
+  "kind": "Module",
+  "moduleSpecifier": "mobx",
+  "observables": [
+    {
+      "binding": {
+        "declarationKind": "const",
+        "exported": false,
+        "name": "state",
+        "scope": "module",
+      },
+      "id": "observable:0",
+      "kind": "Observable",
+      "options": null,
+      "shape": {
+        "kind": "object",
+        "members": [
+          {
+            "accessor": false,
+            "action": null,
+            "annotation": {
+              "kind": "observable",
+              "modifier": "deep",
+            },
+            "annotationSource": "inferred",
+            "computed": null,
+            "key": "x",
+            "memberKind": "field",
+            "span": "3:27-3:31",
+            "static": false,
+            "valueKind": "primitive",
+          },
+        ],
+        "open": false,
+      },
+      "source": "observable",
+      "span": "3:14-3:34",
+      "target": "object",
+    },
+  ],
+  "reactions": [
+    {
+      "api": "reaction",
+      "data": {
+        "async": false,
+        "kind": "inline",
+        "params": 0,
+        "span": "4:9-4:22",
+      },
+      "dependencies": [
+        "access:0",
+      ],
+      "disposerUsed": false,
+      "effect": {
+        "async": false,
+        "kind": "inline",
+        "params": 1,
+        "span": "4:24-4:49",
+      },
+      "id": "reaction:0",
+      "indirectDependencies": [],
+      "kind": "Reaction",
+      "options": null,
+      "span": "4:0-4:50",
+    },
+  ],
+  "unsupported": [],
+}
+`;
