@@ -102,20 +102,24 @@ class Plain { m(k) { return this.map[k]; } }`),
 		).toEqual([
 			"write o[k]",
 			"write o.newKey",
+			"read o.nested",
 			"write o.nested.deep",
 			"delete o[k]",
 			"in k in o",
 			"enumerate Object.keys(o)",
 			"read items[0]",
 			"read items.length",
+			"read o.items",
 			"read o.items[k]",
+			"read store.list",
 			"read store.list[k]",
 			"read getStore()[k]",
+			"read this.map",
 			"read this.map[k]",
 		]);
 	});
 
-	it("leaves plain locals, globals, known observables and static reads alone", () => {
+	it("leaves plain locals, globals and known observables alone; reads any key of untraced values", () => {
 		expect(
 			untraced(`const local = { a: 1 };
 const list = [1, 2];
@@ -135,7 +139,7 @@ function f(k, o) {
   o.a;
   o.nested.name;
 }`),
-		).toEqual([]);
+		).toEqual(["read o.a", "read o.nested", "read o.nested.name"]);
 	});
 
 	it("leaves method calls, optional chains and destructuring targets alone", () => {
@@ -151,7 +155,7 @@ function f(k, o) {
   for (o[k] of xs);
   for (o.x in xs);
 }`),
-		).toEqual([]);
+		).toEqual(["keys for (o.x in xs);"]); // the keys of xs, which may be an observable
 	});
 
 	it("reassigned or untraceably initialized locals are untraced", () => {
@@ -175,11 +179,16 @@ function f(k, o) {
 }`),
 		).toEqual([
 			"read a[k]",
+			"read p.child",
 			"read b[k]",
 			"read c[k]",
+			"read p.store",
+			"read ctx.store",
 			"write ctx.store[k]",
+			"read p.items",
 			"read rows[0]",
 			"read rows[0][k]",
+			"keys ...p",
 			"read copy[k]",
 		]);
 	});
@@ -207,8 +216,13 @@ describe("untraced values: output", () => {
 		expect(code).toContain("__sobx_deleteProperty(o, k)");
 		expect(code).toContain("__sobx_hasProperty(o, k)");
 		expect(code).toContain("__sobx_entriesOf(o)");
-		expect(code).toContain("__sobx_getProperty(o.items, i)");
-		expect(code).toContain('__sobx_getProperty(o.items, "length")');
+		// `o.items` (any key of an untraced value) and `o.items[i]` both.
+		expect(code).toContain(
+			'__sobx_getProperty(o[__sobx_$sobx] !== void 0 ? __sobx_getProperty(o, "items") : o.items, i) : o.items[i]',
+		);
+		expect(code).toContain(
+			'__sobx_getProperty(o[__sobx_$sobx] !== void 0 ? __sobx_getProperty(o, "items") : o.items, "length") : o.items.length',
+		);
 		expect(code).toContain("o[next()] += 1;");
 	});
 
@@ -228,13 +242,20 @@ function f(o, k) { o[k] ??= 2; }`);
 			`import { observer } from "@sobx/react";\n`,
 		);
 		expect(code).toContain('import { observer } from "@sobx/react";');
-		expect(code).toContain("__sobx_getProperty(row.cells, k)");
+		expect(code).toContain(
+			'__sobx_getProperty(row[__sobx_$sobx] !== void 0 ? __sobx_getProperty(row, "cells") : row.cells, k)',
+		);
 	});
 
-	it("leaves files that import neither @sobx/magic nor @sobx/react alone", () => {
-		expect(compile(`function f(o, k) { o[k] = 1; }`, "")).not.toContain(
-			"__sobx_",
-		);
+	it('leaves files that import neither @sobx/magic nor @sobx/react alone with modules: "sobx"', () => {
+		const source = "function f(o, k) { o[k] = 1; }";
+		const ast = parse(source, { sourceType: "module" });
+		const options = { modules: "sobx" } as const;
+		expect(
+			generate(transformSobx(ast.program, source, options).ast).code,
+		).not.toContain("__sobx_");
+		// Compiled by default.
+		expect(compile(source, "")).toContain("__sobx_setProperty(o, k, 1)");
 	});
 });
 
@@ -280,7 +301,9 @@ describe("@sobx/react's local observables", () => {
 		expect(code).toContain('__sobx_setProperty(store, "added", 1)');
 		expect(code).toContain('__sobx_deleteProperty(store, "count")');
 		expect(code).toContain("__sobx_keysOf(store)");
-		expect(code).toContain("__sobx_setProperty(store.tags, props.k, 1)");
+		expect(code).toContain(
+			'__sobx_setProperty(store.tags, props[__sobx_$sobx] !== void 0 ? __sobx_getProperty(props, "k") : props.k, 1)',
+		);
 		expect(code).toContain("__sobx_setProperty(this.tags, k, true)");
 		expect(code).toContain('__sobx_setProperty(this, "extra", 1)');
 		expect(code).not.toContain("ProxyLike");
@@ -365,6 +388,69 @@ log(runs);`,
 	);
 
 	parity(
+		"keys that don't exist yet, read through parameters",
+		`const store = observable({ tags: {} });
+function read(o) { return o.later ?? "none"; }
+function readTop(o) { return [o.added ?? "none", o.tags.later ?? "none"]; }
+function add(o, v) { o.later = v; }
+autorun(() => log(read(store.tags)));
+autorun(() => log(readTop(store)));
+runInAction(() => add(store.tags, 1));
+runInAction(() => { store.added = 2; });
+runInAction(() => add(store.tags, 3));`,
+	);
+
+	parity(
+		"spreads, for...in, Object.assign, JSON.stringify",
+		`const store = observable({ tags: { a: 1 } });
+function spread(o) { return { ...o }; }
+function forIn(o) { const keys = []; for (const k in o) keys.push(k); return keys; }
+function copyInto(o) { return Object.assign({}, o); }
+function json(o) { return JSON.stringify(o); }
+function assignInto(o, extra) { Object.assign(o, extra); }
+autorun(() => log([spread(store.tags), forIn(store.tags), copyInto(store.tags), json(store)]));
+runInAction(() => assignInto(store.tags, { b: 2 }));
+runInAction(() => assignInto(store.tags, { a: 5 }));`,
+	);
+
+	it("structuredClone of a parameter (MobX's proxies can't be cloned)", () => {
+		expect(
+			run(`const store = observable({ tags: { a: 1 } });
+function cloned(o) { return structuredClone(o); }
+autorun(() => log(cloned(store)));
+runInAction(() => { store.tags.b = 2; });`),
+		).toEqual([{ tags: { a: 1 } }, { tags: { a: 1, b: 2 } }]);
+	});
+
+	parity(
+		"hasOwn, hasOwnProperty, getOwnPropertyNames, Reflect.ownKeys",
+		`const store = observable({ tags: {} });
+function checks(o) {
+  return [
+    Object.hasOwn(o, "a"),
+    o.hasOwnProperty("a"),
+    Object.prototype.hasOwnProperty.call(o, "a"),
+    Object.getOwnPropertyNames(o),
+    Reflect.ownKeys(o).filter((k) => typeof k === "string"),
+  ];
+}
+autorun(() => log(checks(store.tags)));
+runInAction(() => { store.tags.a = 1; });`,
+	);
+
+	parity(
+		"a plain local that is given an observable",
+		`const store = observable({ tags: {} });
+function f(k) {
+  const acc = {};
+  acc.tags = store.tags;
+  return acc.tags[k] ?? "none";
+}
+autorun(() => log(f("a")));
+runInAction(() => { store.tags.a = 1; });`,
+	);
+
+	parity(
 		"computeds over a parameter",
 		`const store = observable({ counts: {} });
 function total(counts) { let t = 0; for (const k of Object.keys(counts)) t += counts[k]; return t; }
@@ -374,6 +460,22 @@ runInAction(() => { store.counts.a = 1; });
 runInAction(() => { store.counts.b = 2; });
 runInAction(() => { store.counts.a = 5; });`,
 	);
+});
+
+describe("compiled code with useProxies", () => {
+	afterEach(() => runtime.configure({ useProxies: "never" }));
+
+	it("works on proxied observables too", () => {
+		runtime.configure({ useProxies: "always" });
+		const body = `const store = observable({ tags: {}, list: [1] });
+log(store === store); // escapes: made observable at runtime (behind a proxy)
+function add(o, k) { o[k] = (o[k] ?? 0) + 1; }
+autorun(() => log([Object.keys(store.tags), store.tags.a ?? "none", store.list.length, { ...store.tags }]));
+runInAction(() => add(store.tags, "a"));
+runInAction(() => { store.list[1] = 2; });
+runInAction(() => { delete store.tags.a; });`;
+		expect(run(body)).toEqual(runMobx(body));
+	});
 });
 
 describe("untraced values: plain values behave as without the compiler", () => {
@@ -419,6 +521,17 @@ describe("untraced values: plain values behave as without the compiler", () => {
 		() => "log(Object.entries(o));",
 		() => "log(o.x = 1);",
 		() => "log(o.b ? (o.b.c = 3) : 0);",
+		() => "log(o.a);",
+		() => "log(o.b && o.b.c);",
+		() => "log({ ...o });",
+		() => "{ const ks = []; for (const k in o) ks.push(k); log(ks); }",
+		() => "log(Object.assign({}, o));",
+		() => "log(Object.assign(o, { z: 1 }) === o);",
+		() => "log(JSON.stringify(o));",
+		(k: string) => `log(Object.hasOwn(o, ${k}));`,
+		(k: string) => `log(Object.prototype.hasOwnProperty.call(o, ${k}));`,
+		() => "log(Object.getOwnPropertyNames(o));",
+		() => "log(Reflect.ownKeys(o).map(String));",
 	];
 	const pick = <T>(xs: readonly T[]): T =>
 		xs[Math.floor(Math.random() * xs.length)] as T;

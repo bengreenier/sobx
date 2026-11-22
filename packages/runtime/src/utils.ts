@@ -105,14 +105,25 @@ export interface ConfigureOptions {
 	 * (default) when something observes them, `"always"`, or `"never"`.
 	 */
 	enforceActions?: EnforceActions;
+	/**
+	 * `"always"` / `"ifavailable"`: observable objects and arrays created from now on are put
+	 * behind a `Proxy`, so code the compiler doesn't process (libraries, modules excluded from
+	 * compilation) is observed too: keys that don't exist yet, new keys, `delete`, `in`, key
+	 * enumeration, array index and `length`. Slower than compiled code, which keeps its fast
+	 * paths. `"never"` (default): no proxies.
+	 */
+	useProxies?: "always" | "ifavailable" | "never";
 }
 
-const KNOWN = new Set(["enforceActions"]);
+const KNOWN = new Set(["enforceActions", "useProxies"]);
 
 /** Global settings, like MobX's `configure`. */
 export function configure(options: ConfigureOptions): void {
 	if (options.enforceActions !== undefined) {
 		globalState.enforceActions = options.enforceActions;
+	}
+	if (options.useProxies !== undefined) {
+		globalState.useProxies = options.useProxies !== "never";
 	}
 	if (DEV) {
 		for (const key of Object.keys(options)) {

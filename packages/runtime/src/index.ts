@@ -1,16 +1,22 @@
+import "./proxies.js";
+
 export {
+	assignProperties,
 	deleteProperty,
 	entries,
 	entriesOf,
 	get,
 	getProperty,
 	has,
+	hasOwnKey,
 	hasProperty,
 	keys,
 	keysOf,
 	remove,
 	set,
 	setProperty,
+	trackDeep,
+	trackKeys,
 	updateProperty,
 	values,
 	valuesOf,

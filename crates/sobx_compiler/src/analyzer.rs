@@ -2510,6 +2510,10 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                         out.push(ir::UntracedOperation { kind: "in", key: AccessKey::Dynamic, span: self.span_of(b.span) });
                     }
                 }
+                AstKind::CallExpression(c) if self.untraced_call(c, id).is_some() => {
+                    let kind = self.untraced_call(c, id).unwrap_or_default();
+                    out.push(ir::UntracedOperation { kind, key: AccessKey::Dynamic, span: self.span_of(c.span) });
+                }
                 AstKind::CallExpression(c) => {
                     if let Expression::StaticMemberExpression(m) = &c.callee
                         && let Expression::Identifier(object) = &m.object
@@ -2537,22 +2541,81 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                         out.push(ir::UntracedOperation { kind: "read", key, span: self.span_of(m.span) });
                     }
                 }
+                // Any key: one that doesn't exist yet isn't observed by the object's accessors.
                 AstKind::StaticMemberExpression(m)
-                    if m.property.name.as_str() == "length"
-                        && self.is_plain_read(id, m.span)
-                        && self.maybe_observable(&m.object, id) =>
+                    if self.is_plain_read(id, m.span) && self.maybe_observable(&m.object, id) =>
                 {
                     out.push(ir::UntracedOperation {
                         kind: "read",
-                        key: AccessKey::Static { name: "length".into() },
+                        key: AccessKey::Static { name: m.property.name.as_str().to_string() },
                         span: self.span_of(m.span),
                     });
+                }
+                // `{ ...o }`, `<C {...o} />`: the keys of `o` (including keys added later).
+                AstKind::SpreadElement(s)
+                    if self.parent(id).is_some_and(|p| matches!(self.kind(p), AstKind::ObjectExpression(_)))
+                        && self.maybe_observable(&s.argument, id) =>
+                {
+                    out.push(ir::UntracedOperation { kind: "keys", key: AccessKey::Dynamic, span: self.span_of(s.span) });
+                }
+                AstKind::JSXSpreadAttribute(s) if self.maybe_observable(&s.argument, id) => {
+                    out.push(ir::UntracedOperation { kind: "keys", key: AccessKey::Dynamic, span: self.span_of(s.span) });
+                }
+                AstKind::ForInStatement(f) if self.maybe_observable(&f.right, id) => {
+                    out.push(ir::UntracedOperation { kind: "keys", key: AccessKey::Dynamic, span: self.span_of(f.span) });
                 }
                 _ => {}
             }
         }
         out.sort_by_key(|o| (o.span.start, o.span.end));
         self.untraced = out;
+    }
+
+    /// Calls whose result depends on keys a `Proxy` would observe, on a value that may be an
+    /// observable: `Object.assign` (`assign`), `Object.getOwnPropertyNames` / `getOwnPropertySymbols`
+    /// / `Reflect.ownKeys` (`keys-arg`), `JSON.stringify` / `structuredClone` (`deep-arg`: anything
+    /// reachable), `Object.hasOwn` / `o.hasOwnProperty(k)` / `Object.prototype.hasOwnProperty.call`
+    /// (`has-own`).
+    fn untraced_call(&self, c: &CallExpression, at: NodeId) -> Option<&'static str> {
+        let global = |e: &Expression, name: &str| {
+            matches!(e, Expression::Identifier(id)
+                if id.name.as_str() == name && self.scoping.get_reference(id.reference_id()).symbol_id().is_none())
+        };
+        let arg = |i: usize| c.arguments.get(i).and_then(Argument::as_expression);
+        let maybe = |i: usize| arg(i).is_some_and(|e| self.maybe_observable(e, at));
+        match &c.callee {
+            Expression::Identifier(_) if global(&c.callee, "structuredClone") => {
+                arg(0).is_some_and(|e| !is_fresh_value(e, self.scoping)).then_some("deep-arg")
+            }
+            Expression::StaticMemberExpression(m) => {
+                let name = m.property.name.as_str();
+                if global(&m.object, "Object") {
+                    match name {
+                        "assign" => (c.arguments.iter().any(|a| matches!(a, Argument::SpreadElement(_)))
+                            || (0..c.arguments.len()).any(maybe))
+                        .then_some("assign"),
+                        "getOwnPropertyNames" | "getOwnPropertySymbols" => maybe(0).then_some("keys-arg"),
+                        "hasOwn" => maybe(0).then_some("has-own"),
+                        _ => None,
+                    }
+                } else if global(&m.object, "Reflect") && name == "ownKeys" {
+                    maybe(0).then_some("keys-arg")
+                } else if global(&m.object, "JSON") && name == "stringify" {
+                    arg(0).is_some_and(|e| !is_fresh_value(e, self.scoping)).then_some("deep-arg")
+                } else if name == "hasOwnProperty" && c.arguments.len() == 1 {
+                    self.maybe_observable(&m.object, at).then_some("has-own")
+                } else if name == "call"
+                    && let Expression::StaticMemberExpression(inner) = &m.object
+                    && inner.property.name.as_str() == "hasOwnProperty"
+                    && c.arguments.len() == 2
+                {
+                    maybe(0).then_some("has-own")
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Whether the member at `member` is only read: not written, deleted, called (which would
@@ -2661,10 +2724,75 @@ impl<'s, 'a> Analyzer<'s, 'a> {
                 if !simple || !d.init.as_ref().is_some_and(|init| is_fresh_value(init, self.scoping)) {
                     return true;
                 }
-                // Plain unless reassigned.
-                self.scoping.get_resolved_reference_ids(symbol).iter().any(|r| self.scoping.get_reference(*r).is_write())
+                // Plain unless reassigned, or it escapes (something could put an observable in it).
+                self.scoping.get_resolved_reference_ids(symbol).iter().any(|r| {
+                    let reference = self.scoping.get_reference(*r);
+                    reference.is_write() || self.reference_escapes(reference.node_id())
+                })
             }
             _ => true,
+        }
+    }
+
+    /// Whether a reference to a local holding a plain literal lets its value (or a value inside
+    /// it) flow somewhere an observable could be stored into it: passed to a function, method
+    /// called, aliased, returned, put in another object, or written with a value that isn't plain.
+    /// Plain uses: reading values out of it (into operators, conditions, templates), writing
+    /// plain values into it, `delete`, `typeof`.
+    fn reference_escapes(&self, ident: NodeId) -> bool {
+        let mut top = self.outer(ident);
+        let mut depth = 0;
+        while let Some(parent) = self.parent(top) {
+            if self.member_key_if_object(parent, self.node_span(top)).is_none() {
+                break;
+            }
+            top = self.outer(parent);
+            depth += 1;
+        }
+        let top_span = self.node_span(top);
+        let Some(parent) = self.parent(top) else { return false };
+        match self.kind(parent) {
+            AstKind::ExpressionStatement(_)
+            | AstKind::BinaryExpression(_)
+            | AstKind::UnaryExpression(_)
+            | AstKind::UpdateExpression(_)
+            | AstKind::TemplateLiteral(_)
+            | AstKind::SwitchStatement(_)
+            | AstKind::ForInStatement(_) => false,
+            AstKind::IfStatement(s) => s.test.span() != top_span,
+            AstKind::WhileStatement(s) => s.test.span() != top_span,
+            AstKind::DoWhileStatement(s) => s.test.span() != top_span,
+            AstKind::ConditionalExpression(e) => e.test.span() != top_span,
+            AstKind::AssignmentExpression(a) => {
+                !(depth > 0 && a.left.span() == top_span && is_fresh_value(&a.right, self.scoping))
+            }
+            // Passed to a built-in that only reads it.
+            AstKind::CallExpression(c) => {
+                c.callee.span() == top_span || !self.is_reading_builtin(&c.callee)
+            }
+            _ => true,
+        }
+    }
+
+    /// Global functions that read their arguments without keeping them (`Object.keys`,
+    /// `JSON.stringify`, `console.log`...).
+    fn is_reading_builtin(&self, callee: &Expression) -> bool {
+        let Expression::StaticMemberExpression(m) = callee else { return false };
+        let Expression::Identifier(object) = &m.object else { return false };
+        if self.scoping.get_reference(object.reference_id()).symbol_id().is_some() {
+            return false;
+        }
+        let name = m.property.name.as_str();
+        match object.name.as_str() {
+            "Object" => matches!(
+                name,
+                "keys" | "values" | "entries" | "getOwnPropertyNames" | "getOwnPropertySymbols" | "hasOwn" | "isFrozen"
+            ),
+            "Reflect" => matches!(name, "ownKeys" | "has" | "get" | "getOwnPropertyDescriptor"),
+            "JSON" => name == "stringify",
+            "Array" => name == "isArray",
+            "console" => true,
+            _ => false,
         }
     }
 

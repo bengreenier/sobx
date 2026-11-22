@@ -35,6 +35,7 @@ import {
 	globalState,
 	hooks,
 	markObservable,
+	maybeProxy,
 	notifyOwners,
 	observableValues,
 	runAction,
@@ -403,7 +404,8 @@ function createObservableObject<T extends object>(
 			"sobx: observable() supports plain objects, arrays, Maps and Sets.",
 		);
 	}
-	// Accessors only: sobx never uses `Proxy` (the `proxy` option is accepted and ignored).
+	// Accessors (plus, with `configure({ useProxies: "always" })`, a `Proxy` in front, for code
+	// the compiler doesn't process). The `proxy` option is accepted and ignored.
 	const result = Object.create(Object.getPrototypeOf(value)) as T;
 	for (const key of Reflect.ownKeys(value)) {
 		const descriptor = Object.getOwnPropertyDescriptor(
@@ -417,9 +419,11 @@ function createObservableObject<T extends object>(
 	}
 	// Registered before its values are converted, so cyclic / shared values convert once.
 	administration(result);
-	return convertingTo(value, result, () =>
+	const observable = maybeProxy(result, "object");
+	convertingTo(value, observable, () =>
 		makeAutoObservable(result, overrides, options),
 	);
+	return observable;
 }
 
 // A module side effect that deep conversion (arrays, Maps, ProxyLike...) depends on: keep this

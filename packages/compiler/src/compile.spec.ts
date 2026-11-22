@@ -69,13 +69,14 @@ function parity(name: string, body: string) {
 async function compileWithPlugin(
 	source: string,
 	warn: (m: string) => void = () => {},
+	modules?: "all" | "sobx",
 ): Promise<string> {
 	const result = await transform(
 		source,
 		"/src/file.ts",
 		resolveOptions({
 			parserOptions: { plugins: [...PARSER_PLUGINS] },
-			transformer: [SobxTransformer({ warn })],
+			transformer: [SobxTransformer({ warn, modules })],
 		}),
 	);
 	return result?.code ?? source;
@@ -133,7 +134,10 @@ s.inc?.();`);
 		const out = compile(`const store = observable({ count: 0 });
 function f(store) { return store.count; }
 store.count;`);
-		expect(out).toContain("return store.count;");
+		// The parameter isn't the ProxyLike: it's a value whose origin can't be traced.
+		expect(out).toContain(
+			'return store[__sobx_$sobx] !== void 0 ? __sobx_getProperty(store, "count") : store.count;',
+		);
 		expect(out).toContain('store.get("count");');
 	});
 
@@ -714,8 +718,15 @@ autorun(() => { s.a = 2; });`,
 		]);
 	});
 
-	it("skips files without sobx usages", async () => {
+	it('skips files without sobx usages with modules: "sobx"', async () => {
 		const source = `import { observable } from "mobx";\nconst s = observable({ a: 1 });\ns.a;`;
-		expect(await compileWithPlugin(source)).toBe(source);
+		expect(await compileWithPlugin(source, undefined, "sobx")).toBe(source);
+	});
+
+	it("compiles every module by default", async () => {
+		const out = await compileWithPlugin(
+			"export function count(o) { return Object.keys(o).length; }",
+		);
+		expect(out).toContain("__sobx_keysOf(o)");
 	});
 });

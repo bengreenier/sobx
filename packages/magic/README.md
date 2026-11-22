@@ -8,7 +8,7 @@ The MobX-compatible API you write sobx code against. Its exports are placeholder
 
 Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to your build. MobX code using observable objects, arrays, Maps, Sets and boxes (deep by default), classes (`makeObservable` / `makeAutoObservable` / standard decorators), `computed`, `reaction`, `autorun`, `when`, actions, `flow`, `toJS` and `configure` works unchanged.
 
-sobx never uses `Proxy`. The compiler turns the operations MobX observes through proxies (adding / deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` reads and writes) into runtime calls: on the observables it sees created, and on values whose origin it can't trace (parameters, imports, call results), which may be observables (the runtime calls behave as plain JavaScript otherwise). In modules the compiler doesn't process (those that import neither `@sobx/magic` nor `@sobx/react`), and to read a key that doesn't exist yet through a value the compiler can't trace, use the explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
+sobx doesn't need `Proxy`. The compiler (which processes every module of your app) turns the operations MobX observes through proxies (adding / deleting keys, keys that don't exist yet, `in`, `Object.keys`, spreads, `for...in`, `JSON.stringify`, dynamic keys, array index and `length` reads and writes) into runtime calls: on the observables it sees created, and on values whose origin it can't trace (parameters, imports, call results), which may be observables (the runtime calls behave as plain JavaScript otherwise). For code the compiler doesn't process (libraries), `configure({ useProxies: "always" })` puts observables behind a `Proxy`, as MobX does. sobx also has an explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
 
 A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
@@ -71,15 +71,16 @@ Runtime comparison (MobX vs the same code compiled by sobx), same workload in `n
 
 | Fixture | MobX (ms) | sobx (ms) | sobx vs MobX |
 |---|---|---|---|
-| combined-reaction-on-name | 347.45 | 99.57 | **248.9% faster** |
-| counter-increment | 340.48 | 72.99 | **366.5% faster** |
-| multiple-reactions | 348.06 | 88.10 | **295.1% faster** |
-| observable-writes-only | 82.76 | 22.66 | **265.3% faster** |
-| sync-effect | 348.79 | 96.21 | **262.5% faster** |
-| plain-code-in-compiled-module | 59.36 | 64.71 | 9.0% slower |
-| plain-code-in-derivation | 60.58 | 66.31 | 9.5% slower |
+| combined-reaction-on-name | 361.60 | 93.04 | **288.6% faster** |
+| counter-increment | 346.48 | 73.59 | **370.9% faster** |
+| multiple-reactions | 354.83 | 87.52 | **305.4% faster** |
+| observable-writes-only | 90.81 | 22.77 | **298.7% faster** |
+| runtime-object-reaction | 410.54 | 142.19 | **188.7% faster** |
+| sync-effect | 358.84 | 94.12 | **281.3% faster** |
+| plain-code-in-compiled-module | 62.60 | 65.27 | 4.3% slower |
+| plain-code-in-derivation | 60.08 | 68.73 | 14.4% slower |
 
-The last two measure what the compiler's rewrites cost on plain values: a loop of index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction and inside an `autorun` (as in an observer render). The MobX column runs the same code uncompiled.
+`runtime-object-reaction` uses an observable passed around, so it's an accessor-based object at runtime rather than the compiled fast path; with `configure({ useProxies: "always" })` it takes 239.70 ms (still 67% faster than MobX). The last two measure what the compiler's rewrites cost on plain values: a loop of property and index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction and inside an `autorun` (as in an observer render). The MobX column runs the same code uncompiled.
 
 Earlier versions of this table (MobX 460–513 ms, sobx 108–197 ms) ran the fixtures with the APIs as `node:vm` globals, whose lookups are slow; the bench now passes them as local bindings, as a module's imports are. The bigger ratios come from that harness change, not from a faster runtime.
 

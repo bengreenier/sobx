@@ -150,18 +150,22 @@ describe("observable arrays", () => {
 		expect(seen).toEqual(["0", "1"]);
 	});
 
-	it("is never a Proxy, and plain index / length reads aren't tracked on their own", () => {
-		const a = observable([1]);
-		expect(Object.getPrototypeOf(a)).toBe(ObservableArray.prototype);
-		expect(structuredClone(a)).toEqual([1]); // proxies can't be cloned
-		const direct = vi.fn(() => a.length);
-		autorun(direct);
-		runInAction(() => a.push(2));
-		expect(direct).toHaveBeenCalledTimes(1); // the documented limitation
-		const viaGet = track(() => [a.get(0), a.get(5)]);
-		runInAction(() => a.set(0, 9));
-		expect(viaGet).toEqual(["[1,null]", "[9,null]"]);
-	});
+	// Not in the "proxies" test project, where observables are behind proxies.
+	it.skipIf(process.env.SOBX_USE_PROXIES)(
+		"is never a Proxy, and plain index / length reads aren't tracked on their own",
+		() => {
+			const a = observable([1]);
+			expect(Object.getPrototypeOf(a)).toBe(ObservableArray.prototype);
+			expect(structuredClone(a)).toEqual([1]); // proxies can't be cloned
+			const direct = vi.fn(() => a.length);
+			autorun(direct);
+			runInAction(() => a.push(2));
+			expect(direct).toHaveBeenCalledTimes(1); // the documented limitation
+			const viaGet = track(() => [a.get(0), a.get(5)]);
+			runInAction(() => a.set(0, 9));
+			expect(viaGet).toEqual(["[1,null]", "[9,null]"]);
+		},
+	);
 
 	it("notifies the property holding it (index / length reads through a property are tracked)", () => {
 		const store = observable({ items: [1, 2], nested: [[1]] });

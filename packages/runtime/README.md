@@ -40,7 +40,7 @@ MobX-compatible:
 - **`flow(function* () {...})`**: an async action; each step between `yield`s runs as an action, `yield promise` waits for it. The result returns a promise with `cancel()` (rejects with `FlowCancellationError`).
 - **`comparer`**: `default`, `identity`, `structural`, `shallow`, for `equals` options.
 - **`toJS(value)`**: deep conversion back to plain arrays, objects, Maps and Sets (without computeds and functions; cycles preserved).
-- **`configure({ enforceActions })`**: `"observed"` (default), `"always"`, `"never"`. Other MobX options are ignored (with a warning in development).
+- **`configure({ enforceActions, useProxies })`**: `enforceActions`: `"observed"` (default), `"always"`, `"never"`. `useProxies: "always"` (or `"ifavailable"`): observable objects and arrays created from then on are behind a `Proxy`, so code the compiler doesn't process (libraries) is observed too; slower, opt-in (`"never"` is the default). Other MobX options are ignored (with a warning in development).
 - **`isObservable`**, **`isObservableArray`**, **`isObservableObject`**, **`isObservableMap`**, **`isObservableSet`**, **`isBoxedObservable`**, **`isComputed`**, **`isAction`**, **`isFlowCancellationError`**.
 - **`action(fn)`** / **`action(name, fn)`**, **`runInAction(fn)`**: batched, untracked.
 - **`makeObservable(target, annotations, options?)`**, **`makeAutoObservable(target, overrides?, options?)`**: for classes (call them in the constructor) and objects. Options: `autoBind`, `deep`.
@@ -51,7 +51,7 @@ Also:
 
 - **`untracked(fn)`**, **`batch(fn)`**.
 - **`currentTracking()`**: an opaque object identifying the derivation run in progress (or `null`), for bindings such as `@sobx/react`.
-- Compiler helpers (emitted by `@sobx/compiler`; plain JavaScript semantics for non-observables): `getProperty`, `setProperty`, `updateProperty`, `deleteProperty`, `hasProperty`, `keysOf`, `valuesOf`, `entriesOf`. Compiled code also reads `globalState` (whether a derivation is running) and `$sobx` (the mark on observable arrays, `ProxyLike`s and observable objects): internal, don't modify them.
+- Compiler helpers (emitted by `@sobx/compiler`; plain JavaScript semantics for non-observables): `getProperty`, `setProperty`, `updateProperty`, `deleteProperty`, `hasProperty`, `keysOf`, `valuesOf`, `entriesOf`, `trackKeys`, `trackDeep`, `assignProperties`, `hasOwnKey`. Compiled code also reads `globalState` (whether a derivation is running) and `$sobx` (the mark on observable arrays, `ProxyLike`s and observable objects): internal, don't modify them.
 - **`ProxyLike`**: see below.
 
 ## `ProxyLike`

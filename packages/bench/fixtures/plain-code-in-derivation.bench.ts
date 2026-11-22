@@ -17,6 +17,10 @@ function tally(counts, key) {
 function size(counts) {
 	return Object.keys(counts).length;
 }
+function area(shape) {
+	return shape.width * shape.height + shape.border.size;
+}
+const shape = { width: 2, height: 3, border: { size: 1 } };
 const values = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const counts = {};
 const keys = ["a", "b", "c", "d"];
@@ -26,6 +30,7 @@ autorun(() => {
 		checksum += sum(values);
 		tally(counts, keys[i % 4]);
 		checksum += size(counts);
+		checksum += area(shape);
 	}
 	if (checksum < 0) throw new Error("unreachable");
 });

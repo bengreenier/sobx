@@ -16,6 +16,7 @@ import {
 	globalState,
 	hooks,
 	markObservable,
+	maybeProxy,
 	notifyOwners,
 	type Owner,
 	observableValues,
@@ -416,10 +417,11 @@ export function createObservableArray<T>(
 	};
 	Object.defineProperty(array, ARRAY, { value: adm });
 	observableValues.add(array);
-	convertingTo(values, array, () => {
+	const observable = maybeProxy(array, "array");
+	convertingTo(values, observable, () => {
 		push.apply(array, insert(adm, Array.from(values as Iterable<T>)));
 	});
-	return array;
+	return observable;
 }
 
 // -- boxes ----------------------------------------------------------------------------------

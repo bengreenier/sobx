@@ -22,12 +22,28 @@ export const DEFAULT_MODULE_SPECIFIER = "@sobx/magic";
 export const REACT_MODULE = "@sobx/react";
 
 export interface TransformSobxOptions {
-	/** Module specifier to treat as sobx. Default `"@sobx/magic"`. Only modules that import it (or `"@sobx/react"`) are transformed. */
+	/** Module specifier to treat as sobx: its imports are redirected to `@sobx/runtime`. Default `"@sobx/magic"`. */
 	moduleSpecifier?: string;
 	/** Filename, passed to the analyzer and used in diagnostics. */
 	filename?: string;
 	/** Per-code severity overrides for diagnostics. */
 	diagnostics?: DiagnosticsConfig;
+	/**
+	 * Which modules to compile: `"all"` (default), so that property operations on observables
+	 * passed to any module are observed; or `"sobx"`, only modules that import the API module or
+	 * `@sobx/react` (faster builds; other modules must use the explicit API).
+	 */
+	modules?: "all" | "sobx";
+}
+
+/** Whether `source` should be compiled under `options`. */
+export function shouldCompile(
+	source: string,
+	options: Pick<TransformSobxOptions, "moduleSpecifier" | "modules"> = {},
+): boolean {
+	if ((options.modules ?? "all") === "all") return true;
+	const moduleSpecifier = options.moduleSpecifier ?? DEFAULT_MODULE_SPECIFIER;
+	return source.includes(moduleSpecifier) || source.includes(REACT_MODULE);
 }
 
 /** The analysis of one module: what to rewrite, and what to report. */
@@ -46,7 +62,7 @@ export function compileUnit(
 	options: TransformSobxOptions = {},
 ): CompileUnit {
 	const moduleSpecifier = options.moduleSpecifier ?? DEFAULT_MODULE_SPECIFIER;
-	if (!source.includes(moduleSpecifier) && !source.includes(REACT_MODULE)) {
+	if (!shouldCompile(source, options)) {
 		return { plan: emptyPlan(moduleSpecifier), diagnostics: [] };
 	}
 	const mod = analyze(source, { moduleSpecifier, filename: options.filename });

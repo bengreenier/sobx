@@ -79,10 +79,28 @@ export interface SobxModule {
  * origin the analyzer can't trace, so it may be an observable.
  */
 export interface UntracedOperation {
-	/** `read` / `write` / `delete`: of the member at `span`; `in` / `enumerate`: the expression at `span`. */
-	kind: "read" | "write" | "delete" | "in" | "enumerate";
+	/**
+	 * `read` / `write` / `delete`: of the member at `span`. `in` / `enumerate`: the expression at
+	 * `span`. `keys`: the object spread / JSX spread attribute / `for...in` at `span` enumerates
+	 * its value's keys. Calls at `span`: `assign` (`Object.assign`), `keys-arg`
+	 * (`Object.getOwnPropertyNames` / `getOwnPropertySymbols`, `Reflect.ownKeys`), `deep-arg`
+	 * (`JSON.stringify`, `structuredClone`: everything reachable from the first argument),
+	 * `has-own` (`Object.hasOwn`, `o.hasOwnProperty(k)`, `Object.prototype.hasOwnProperty.call`).
+	 */
+	kind:
+		| "read"
+		| "write"
+		| "delete"
+		| "in"
+		| "enumerate"
+		| "keys"
+		| "assign"
+		| "keys-arg"
+		| "deep-arg"
+		| "has-own";
 	key: AccessKey;
-	span: Span;
+	/** Offsets only (no line / column). */
+	span: Pick<Span, "start" | "end">;
 }
 
 // ---------------------------------------------------------------------------

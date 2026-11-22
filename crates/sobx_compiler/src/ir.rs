@@ -49,7 +49,17 @@ pub struct UntracedOperation {
     /// `read` / `write` / `delete`: the member at `span`; `in` / `enumerate`: the expression.
     pub kind: &'static str,
     pub key: AccessKey,
+    /// Offsets only (there can be many of these; the compiler matches them by offset).
+    #[serde(serialize_with = "offsets")]
     pub span: Span,
+}
+
+fn offsets<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeStruct;
+    let mut s = serializer.serialize_struct("Offsets", 2)?;
+    s.serialize_field("start", &span.start)?;
+    s.serialize_field("end", &span.end)?;
+    s.end()
 }
 
 // Variant names are the IR's JSON `kind` tags.

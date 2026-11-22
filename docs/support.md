@@ -6,15 +6,21 @@ supported API is implemented by [`@sobx/runtime`](../packages/runtime), a MobX-s
 `@sobx/magic` imports to it, and on top of that compiles local observable objects to a faster
 form.
 
-**sobx never uses `Proxy`.** Operations that MobX observes through its proxies (adding or
-deleting keys, `in`, `Object.keys`, dynamic keys, array index and `length` reads and writes) are
-compiled into runtime calls: precisely on the observables the compiler sees created, and on any
-value whose origin it can't trace (a parameter such as React props, an import, a call result such
-as `useContext()`), which may be an observable. Those runtime calls behave as plain JavaScript on
-other values. What remains is listed under
-[Differences from MobX](#differences-from-mobx). sobx also has an explicit API: `set`, `remove`,
-`has`, `get`, `keys`, `values`, `entries` (same names and semantics as MobX's object API
-functions), for modules the compiler doesn't process.
+**sobx doesn't need `Proxy`.** Operations that MobX observes through its proxies (adding or
+deleting keys, keys that don't exist yet, `in`, `Object.keys`, spreads, `for...in`,
+`JSON.stringify`, dynamic keys, array index and `length` reads and writes) are compiled into
+runtime calls: precisely on the observables the compiler sees created, and on any value whose
+origin it can't trace (a parameter such as React props, an import, a call result such as
+`useContext()`), which may be an observable. Those runtime calls behave as plain JavaScript on
+other values. The compiler processes every module of your app by default.
+
+For code the compiler doesn't process (libraries in `node_modules`, or modules excluded from
+compilation), `configure({ useProxies: "always" })` puts observable objects and arrays behind a
+`Proxy`, as MobX does, so that code is observed too. It's opt-in: compiled code doesn't need it
+and is faster without it (see [Proxies](#proxies-for-code-the-compiler-doesnt-process)).
+
+sobx also has an explicit API: `set`, `remove`, `has`, `get`, `keys`, `values`, `entries` (same
+names and semantics as MobX's object API functions).
 
 Each pattern below has one of these outcomes:
 
@@ -49,7 +55,7 @@ code imports it.
 | `comparer.default` / `.identity` / `.structural` / `.shallow` | Yes | For `equals` options. |
 | `toJS(value)` | Yes | Deep conversion back to plain arrays, objects, Maps and Sets (computeds and functions are left out; cycles preserved). |
 | `set`, `remove`, `has`, `get`, `keys`, `values`, `entries` | Yes | sobx's explicit API for observable objects, arrays, Maps and Sets. The compiler emits equivalent calls for the operations it can see. |
-| `configure({ enforceActions })` | Yes | Other MobX options (including `useProxies`) are ignored, with a warning in development. |
+| `configure({ enforceActions, useProxies })` | Yes | `useProxies: "always"` puts new observable objects and arrays behind a `Proxy`, for code the compiler doesn't process. Other MobX options are ignored, with a warning in development. |
 | `isObservable`, `isObservableArray`, `isObservableObject`, `isObservableMap`, `isObservableSet`, `isBoxedObservable`, `isComputed`, `isAction`, `isFlowCancellationError`, `untracked` | Yes | |
 | Legacy (`experimentalDecorators`) decorators, `@observable x` without `accessor` | No | Error (`invalid-annotation`). |
 | `extendObservable`, `observe`, `intercept`, `spy`, `trace`, `reaction` options like `delay` / `scheduler` / `onError`, ... | No | Error (`unknown-import` / `unsupported-api` / `unsupported-option`). |
@@ -120,18 +126,22 @@ returned by `transformSobx` and not printed by the bundler plugins.
 
 ## Values whose origin can't be traced
 
-In a module the compiler processes (one that imports `@sobx/magic` or `@sobx/react`), a value may
-be an observable the compiler can't see created: a parameter (React props), an import from
-another module, a call result (`useContext(...)`, a hook, a getter function), a variable
-initialized from one of these or reassigned, `this` outside an observable class or object, and
-anything reached through them (`props.store.items`). On those, the operations only a `Proxy` would
-observe are compiled to runtime calls:
+A value may be an observable the compiler can't see created: a parameter (React props), an
+import from another module, a call result (`useContext(...)`, a hook, a getter function), a
+variable initialized from one of these or reassigned, a local object or array that holds one or
+lets one in (passed to a function, written with such a value, aliased...), `this` outside an
+observable class or object, and anything reached through them (`props.store.items`). On those,
+the operations only a `Proxy` would observe are compiled to runtime calls:
 
 | Pattern | Compiled to |
 |---|---|
-| `o[k]`, `o[0]`, `o.length` | `getProperty(o, k)` |
+| `o.k` (any key: it may not exist yet), `o[k]`, `o[0]`, `o.length` | `getProperty(o, k)` |
 | `k in o`, `Object.keys` / `values` / `entries(o)` | `hasProperty`, `keysOf`, `valuesOf`, `entriesOf` |
 | `o.k = v`, `o[k] = v`, `o.k += v`, `o[k]++`, `o.k ||= v`, `delete o[k]` | `setProperty`, `updateProperty`, `deleteProperty` |
+| `{ ...o }`, `<C {...o} />`, `for (k in o)`, `Object.getOwnPropertyNames(o)`, `Reflect.ownKeys(o)` | the value goes through `trackKeys(o)` |
+| `JSON.stringify(o)`, `structuredClone(o)` | the value goes through `trackDeep(o)` (everything reachable) |
+| `Object.assign(o, ...)`, `Object.assign(x, o)` | `assignProperties` (new keys of an observable target become observable) |
+| `Object.hasOwn(o, k)`, `o.hasOwnProperty(k)`, `Object.prototype.hasOwnProperty.call(o, k)` | `hasOwnKey(o, k)` |
 
 The helpers are only called for observables: when the object is a name or a static property
 chain (`items`, `props.items`), the compiled code checks the mark the runtime puts on observables
@@ -141,24 +151,46 @@ helper only inside reactions, computeds and observer renders
 mark. The runtime calls behave exactly as the plain operations on values that aren't observables
 (checked by a differential fuzz test, in and outside derivations).
 
-Cost on plain values (`packages/bench`, a loop of nothing but index / `length` reads,
-dynamic-key writes and `Object.keys` on plain data reached through parameters): 9% slower
-outside derivations, 10% slower inside one (as in an observer render). Output size: the React
-example spec (`packages/react/src/react.compiled.spec.tsx`, dense with store operations) grows
-26% minified, 15% gzipped, including the rewrites of observables the compiler sees.
+Cost on plain values (`packages/bench`, a loop of nothing but property and index / `length`
+reads, dynamic-key writes and `Object.keys` on plain data reached through parameters): 4% slower
+outside derivations, 14% slower inside one (as in an observer render). Output size grows with the
+number of such operations (the React example spec, dense with them, grew 26% minified and 15%
+gzipped before property reads were rewritten too).
 
-Values known to be plain (literals, and local objects and arrays whose contents are all plain,
+Values known to be plain (literals, local objects and arrays that only ever hold plain values,
 `new Map()`, ...), globals, and observables the compiler sees created are left alone or compiled
 precisely. Method calls (`o[k]()`), optional chains (`o?.[k]`), destructuring targets and compound
-writes whose object or key has side effects are left as they are (no error). Modules that import
-neither `@sobx/magic` nor `@sobx/react` aren't compiled: use the explicit API there.
+writes whose object or key has side effects are left as they are (no error).
+
+The compiler processes every module by default (`modules: "all"`, an option of the bundler
+plugins); `modules: "sobx"` only compiles modules that import `@sobx/magic` or `@sobx/react`, for
+faster builds. `node_modules` aren't compiled unless `include`d.
+
+## Proxies for code the compiler doesn't process
+
+Code the compiler never sees (libraries in `node_modules`, `eval`, modules excluded from
+compilation) operates on observables as plain JavaScript. To observe it anyway, call
+`configure({ useProxies: "always" })` (MobX's option; `"ifavailable"` does the same, `"never"` is
+the default) before creating observables. Observable objects and arrays created from then on are
+behind a `Proxy`:
+
+- reads of keys that don't exist yet, new keys, `delete`, `in`, `Object.keys` / spreads /
+  `for...in` and anything else that lists keys are observed (through the same runtime helpers
+  compiled code uses);
+- existing keys still go through the observable's accessors, and array methods run on the array
+  itself, so the proxy only does what the accessors can't;
+- compiled code keeps its fast paths (`ProxyLike` objects aren't proxied).
+
+It costs: on a runtime (accessor-based) observable, a reaction / write loop runs about 70% slower
+with proxies (`packages/bench`, `runtime-object-reaction`: 142 ms → 240 ms; MobX: 401 ms).
+Class instances (`makeObservable(this)`) aren't proxied, as in MobX.
 
 ## Reactivity
 
 | Pattern | Outcome |
 |---|---|
 | Reads in reactions, autoruns and computeds, including in functions they call and conditional reads | Tracked dynamically, like MobX. |
-| Observables shared across modules | Runtime: exported observables are accessor-based, so other modules' reads and writes of declared properties are tracked; in a module that imports `@sobx/magic` or `@sobx/react`, the other property operations on an imported value are compiled like those on any value whose origin can't be traced. |
+| Observables shared across modules | Runtime: exported observables are accessor-based, so other modules' reads and writes of declared properties are tracked; the other property operations on an imported value are compiled like those on any value whose origin can't be traced. |
 | Changing observed observables outside actions | Warning at runtime in development builds, as in MobX (`configure({ enforceActions })`: `"observed"` by default, `"always"`, `"never"`). Reactions and effects may change state. |
 | Writes inside a reaction's data function, autorun or computed | Warning (`write-in-derivation`). |
 | Accesses after `await` in an action or tracked function | Warning (`after-await`): they run outside the action / tracking, as in MobX. |
@@ -175,21 +207,11 @@ proxies; the compiler's parity tests run the same source as is against MobX and 
 sobx (added / deleted keys, `in`, `Object.keys`, dynamic keys, array index / `length` writes,
 nested writes). Both check that the logged values match. Known differences:
 
-- No `Proxy`. Two things follow:
-  - A dot-syntax read of a key that doesn't exist yet (`o.later`, added afterwards) is only
-    tracked when the compiler sees the observable created (it then knows the declared keys).
-    Through a value it can't trace, it isn't: read it with `get(o, "later")`, or declare the key
-    up front. For props and context this is inherent without a `Proxy`. For imported observables
-    it isn't implemented (the compiler doesn't analyze the exporting module). Either way it only
-    matters for an object nothing holds through an observable property: for `store.tags.later`,
-    adding `later` notifies whatever read `store.tags`, so the read re-runs anyway.
-  - On values the compiler can't trace, `Object.assign(o, ...)` into them, `{ ...o }`,
-    `for...in`, `JSON.stringify(o)` and `Object.getOwnPropertyNames(o)` don't see keys added
-    later (use `keys(o)` / `toJS(o)` in derivations), and a plain local that is later given an
-    observable (`const acc = {}; acc.s = props.store; acc.s[k] = 1`) is still treated as plain.
-  - Modules that import neither `@sobx/magic` nor `@sobx/react` aren't compiled, so the
-    operations above aren't observed there: use the explicit API (`set`, `remove`, `has`,
-    `keys`, `get`, `array.set(i, v)`, `array.setLength(n)`).
+- Without `useProxies`, code the compiler doesn't process (`node_modules` unless included,
+  `eval` / `new Function`) only observes the declared properties of observables (through their
+  accessors) and array methods / iteration. Turn on `configure({ useProxies: "always" })` to
+  observe everything there, or pass it `toJS(store)`.
+- `structuredClone` works on sobx observables (MobX's proxies can't be cloned).
 
 - Cyclic plain data (`x.self = x`) converts to an observable with the same cycle; MobX
   overflows the stack.

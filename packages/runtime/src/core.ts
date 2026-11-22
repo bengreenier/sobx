@@ -46,6 +46,11 @@ export const globalState = {
 	allowStateChanges: 0,
 	/** Like MobX's `configure({ enforceActions })`. Checked in development builds only. */
 	enforceActions: "observed" as EnforceActions,
+	/**
+	 * `configure({ useProxies: "always" })`: new observable objects and arrays are created behind
+	 * a `Proxy`, so code the compiler doesn't process is observed too (see `proxies.ts`).
+	 */
+	useProxies: false,
 };
 
 // The runtime targets any JS environment.
@@ -154,10 +159,11 @@ const ownersOf = new WeakMap<object, Set<Owner>>();
 export function adopt(value: unknown, owner: Owner): void {
 	if (typeof value !== "object" || value === null) return;
 	if (!observableValues.has(value)) return;
-	let owners = ownersOf.get(value);
+	const key = rawOf(value);
+	let owners = ownersOf.get(key);
 	if (!owners) {
 		owners = new Set();
-		ownersOf.set(value, owners);
+		ownersOf.set(key, owners);
 	}
 	owners.add(owner);
 }
@@ -165,12 +171,12 @@ export function adopt(value: unknown, owner: Owner): void {
 /** Record that `owner` no longer holds `value`. */
 export function release(value: unknown, owner: Owner): void {
 	if (typeof value !== "object" || value === null) return;
-	ownersOf.get(value)?.delete(owner);
+	ownersOf.get(rawOf(value))?.delete(owner);
 }
 
 /** Whether anything observes `value` through one of its owners. */
 export function ownersObserved(value: object): boolean {
-	const owners = ownersOf.get(value);
+	const owners = ownersOf.get(rawOf(value));
 	if (!owners) return false;
 	for (const owner of owners) if (owner.ownerObserved()) return true;
 	return false;
@@ -180,6 +186,7 @@ let notifying: Set<object> | null = null;
 
 /** Tell `value`'s owners that it changed (cycle-safe). */
 export function notifyOwners(value: object): void {
+	value = rawOf(value);
 	const owners = ownersOf.get(value);
 	if (!owners || owners.size === 0) return;
 	const outer = notifying === null;
@@ -203,7 +210,34 @@ export function notifyOwners(value: object): void {
 export const hooks = {
 	/** Make a plain object observable (`deep`: whether its own values are deep too). */
 	object: (value: object, _deep: boolean): object => value,
+	/** Put a new observable object / array behind a `Proxy` (set by `proxies.ts`). */
+	proxy: <T extends object>(raw: T, _kind: "object" | "array"): T => raw,
 };
+
+/** Proxies of observables (`useProxies`) and the observable behind each. */
+export const proxyTargets = new WeakMap<object, object>();
+
+/** The observable behind `value` if it's a proxy of one, else `value`. */
+export function rawOf(value: object): object {
+	return proxyTargets.get(value) ?? value;
+}
+
+/**
+ * Put a new observable behind a proxy if `useProxies` is on (registered as observable too).
+ * Runtime internals keep using `raw`.
+ */
+export function maybeProxy<T extends object>(
+	raw: T,
+	kind: "object" | "array",
+): T {
+	if (!globalState.useProxies) return raw;
+	const proxy = hooks.proxy(raw, kind);
+	if (proxy !== raw) {
+		proxyTargets.set(proxy, raw);
+		observableValues.add(proxy);
+	}
+	return proxy;
+}
 
 interface Scheduled {
 	runScheduled(): void;

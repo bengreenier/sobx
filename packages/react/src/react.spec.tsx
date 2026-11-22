@@ -259,6 +259,36 @@ describe("hooks and components", () => {
 	});
 });
 
+describe("useProxies (code the compiler doesn't process)", () => {
+	afterEach(() => configure({ useProxies: "never" }));
+
+	it("observer components see keys added, deleted and enumerated with plain JavaScript", () => {
+		configure({ useProxies: "always", enforceActions: "never" });
+		const tags = observable({} as Record<string, number>);
+		const list = observable([1]);
+		const View = observer(() => (
+			<span>
+				{Object.keys(tags).join(",")}|{tags.a ?? "-"}|{list.length}:
+				{list[1] ?? "-"}
+			</span>
+		));
+		const { container } = render(<View />);
+		expect(container.textContent).toBe("|-|1:-");
+		act(() => {
+			tags.a = 1;
+		});
+		act(() => {
+			list[1] = 2;
+		});
+		expect(container.textContent).toBe("a|1|2:2");
+		act(() => {
+			delete tags.a;
+		});
+		expect(container.textContent).toBe("|-|2:2");
+		configure({ enforceActions: "observed" });
+	});
+});
+
 describe("static rendering", () => {
 	afterEach(() => enableStaticRendering(false));
 

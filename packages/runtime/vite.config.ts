@@ -26,6 +26,16 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
+					name: "proxies",
+					include: ["**/*.spec.ts"],
+					environment: "node",
+					env: { SOBX_USE_PROXIES: "1" },
+					setupFiles: ["test/use-proxies.ts"],
+				},
+			},
+			{
+				extends: true,
+				test: {
 					name: "browser",
 					include: ["**/*.test.ts"],
 					browser: {

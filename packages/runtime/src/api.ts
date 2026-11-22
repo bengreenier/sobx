@@ -14,7 +14,7 @@ import {
 	ObservableSet,
 	observeArray,
 } from "./collections.js";
-import { $sobx, endBatch, startBatch } from "./core.js";
+import { $sobx, endBatch, globalState, startBatch } from "./core.js";
 import {
 	addObservableProperty,
 	administrationOf,
@@ -283,4 +283,80 @@ export function valuesOf(target: unknown): unknown[] {
 export function entriesOf(target: unknown): Array<[string, unknown]> {
 	if (!isMarked(target)) return Object.entries(target as object);
 	return keysOf(target).map((key) => [key, getProperty(target, key)]);
+}
+
+/**
+ * `target`, after tracking its keys (inside derivations): for `{ ...target }`, `<C {...target} />`,
+ * `for (k in target)`, `Object.getOwnPropertyNames(target)`, `Reflect.ownKeys(target)`.
+ */
+export function trackKeys<T>(target: T): T {
+	if (globalState.tracking !== null && isMarked(target)) keysOf(target);
+	return target;
+}
+
+/**
+ * `value`, after tracking everything reachable from it (inside derivations): for
+ * `JSON.stringify(value)` and `structuredClone(value)`, which read it all.
+ */
+export function trackDeep<T>(value: T): T {
+	if (globalState.tracking !== null) visitDeep(value, new Set());
+	return value;
+}
+
+function visitDeep(value: unknown, seen: Set<object>): void {
+	if (typeof value !== "object" || value === null || seen.has(value)) return;
+	seen.add(value);
+	if (value instanceof Map) {
+		for (const [, item] of value) visitDeep(item, seen);
+	} else if (value instanceof Set) {
+		for (const item of value) visitDeep(item, seen);
+	} else if (Array.isArray(value)) {
+		const length = getProperty(value, "length") as number;
+		for (let i = 0; i < length; i++) visitDeep(getProperty(value, i), seen);
+	} else {
+		for (const key of keysOf(value)) visitDeep(getProperty(value, key), seen);
+	}
+}
+
+/**
+ * `Object.assign(target, ...sources)`: keys added to an observable target become observable
+ * properties, and observable sources' keys are tracked.
+ */
+export function assignProperties<T extends object>(
+	target: T,
+	...sources: unknown[]
+): T {
+	if (!isMarked(target)) {
+		return Object.assign(target, ...sources.map((source) => trackKeys(source)));
+	}
+	startBatch();
+	try {
+		for (const source of sources) {
+			if (source == null) continue;
+			if (isMarked(source)) {
+				for (const key of keysOf(source)) {
+					setProperty(target, key, getProperty(source, key));
+				}
+				continue;
+			}
+			const from = Object(source) as AnyRecord;
+			for (const key of Reflect.ownKeys(from)) {
+				if (Object.prototype.propertyIsEnumerable.call(from, key)) {
+					setProperty(target, key, from[key]);
+				}
+			}
+		}
+	} finally {
+		endBatch();
+	}
+	return target;
+}
+
+/** `Object.hasOwn(target, key)` / `target.hasOwnProperty(key)`, tracked like {@link hasProperty}. */
+export function hasOwnKey(target: unknown, key: PropertyKey): boolean {
+	if (isMarked(target) && globalState.tracking !== null) {
+		if (target instanceof ObservableArray) observeArray(target);
+		else if (isObservableObjectLike(target)) has(target, key);
+	}
+	return Object.hasOwn(target as object, key);
 }

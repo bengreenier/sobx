@@ -66,6 +66,8 @@ export interface CompilePlan {
 	 * rewritten when that preserves their semantics, and otherwise left as they are, silently.
 	 */
 	untraced: Set<string>;
+	/** Spreads, `for...in` and calls on untraced values that need a helper, by span (see `UntracedOperation`). */
+	wraps: Map<string, "keys" | "assign" | "keys-arg" | "deep-arg" | "has-own">;
 	/** Spans the final rewrite handled (set by {@link finalizePlan}). */
 	rewritten: Set<string>;
 	/** Writes that would not be observed and couldn't be rewritten (set by {@link finalizePlan}). */
@@ -95,6 +97,7 @@ export function emptyPlan(moduleSpecifier: string): CompilePlan {
 		operations: new Set(),
 		pathBases: new Set(),
 		untraced: new Set(),
+		wraps: new Map(),
 		rewritten: new Set(),
 		uncompiled: [],
 	};
@@ -274,6 +277,16 @@ function planPropertyOperations(mod: SobxModule, plan: CompilePlan): void {
 function planUntracedOperations(mod: SobxModule, plan: CompilePlan): void {
 	for (const op of mod.untracedOperations) {
 		const span = spanKey(op.span);
+		if (
+			op.kind === "keys" ||
+			op.kind === "assign" ||
+			op.kind === "keys-arg" ||
+			op.kind === "deep-arg" ||
+			op.kind === "has-own"
+		) {
+			plan.wraps.set(span, op.kind);
+			continue;
+		}
 		const key: KeyRef =
 			op.key.kind === "static" ? { name: op.key.name } : { dynamic: true };
 		const target =
@@ -426,7 +439,7 @@ function trackingRead(
 	// `items`, `props.items`, `this.rows`: check the observable mark inline, as writes do, so
 	// plain values skip the helper inside derivations too. (Only for such simple objects, so the
 	// object isn't duplicated with conditionals of its own.)
-	if (isSimpleObject(target)) {
+	if (isSimpleObject(target) && !hasPlannedRead(target, plan)) {
 		state.helpers.add("$sobx");
 		const object = t.cloneNode(rewrite(target, plan, state) as t.Expression);
 		const test = t.binaryExpression(
@@ -463,6 +476,67 @@ function trackingRead(
 	return t.conditionalExpression(test, helpers, plain);
 }
 
+/**
+ * Spreads, `for...in` and calls that read keys or values of a value that may be an observable
+ * (see `UntracedOperation`): the value goes through a helper that tracks what the operation will
+ * read (only inside derivations), or the call is replaced by one that observes it.
+ */
+function rewriteWrap(
+	node: t.Node,
+	wrap: CompilePlan["wraps"] extends Map<string, infer K> ? K : never,
+	r: <N extends t.Node>(n: N) => N,
+	state: RewriteState,
+): t.Node | undefined {
+	const track = (name: string, e: t.Node) =>
+		helper(state, name, [r(e as t.Expression)]);
+	if (wrap === "keys") {
+		if (t.isSpreadElement(node) || t.isJSXSpreadAttribute(node)) {
+			return { ...node, argument: track("trackKeys", node.argument) };
+		}
+		if (t.isForInStatement(node)) {
+			return {
+				...node,
+				left: r(node.left),
+				right: track("trackKeys", node.right),
+				body: r(node.body),
+			};
+		}
+		return undefined;
+	}
+	if (!t.isCallExpression(node)) return undefined;
+	const args = node.arguments;
+	const [first, second] = args;
+	if (wrap === "assign") {
+		return helper(state, "assignProperties", args.map(r) as t.Expression[]);
+	}
+	if (wrap === "keys-arg" || wrap === "deep-arg") {
+		if (!first || !t.isExpression(first)) return undefined;
+		return {
+			...node,
+			callee: r(node.callee),
+			arguments: [
+				track(wrap === "keys-arg" ? "trackKeys" : "trackDeep", first),
+				...args.slice(1).map(r),
+			],
+		};
+	}
+	// has-own
+	const callee = node.callee;
+	if (
+		t.isMemberExpression(callee) &&
+		t.isIdentifier(callee.property, { name: "hasOwnProperty" }) &&
+		t.isExpression(callee.object) &&
+		first &&
+		t.isExpression(first)
+	) {
+		return helper(state, "hasOwnKey", [r(callee.object), r(first)]);
+	}
+	if (first && second && t.isExpression(first) && t.isExpression(second)) {
+		return helper(state, "hasOwnKey", [r(first), r(second)]);
+	}
+	return undefined;
+}
+
 /** A name, `this`, or a chain of static property reads of one (`props.items`), but not `x.length`. */
 function isSimpleObject(node: t.Node): boolean {
 	if (t.isIdentifier(node) || t.isThisExpression(node)) return true;
@@ -473,6 +547,14 @@ function isSimpleObject(node: t.Node): boolean {
 		node.property.name !== "length" &&
 		isSimpleObject(node.object)
 	);
+}
+
+/** Whether a member chain contains a read the plan rewrites. */
+function hasPlannedRead(node: t.Node, plan: CompilePlan): boolean {
+	for (let n: t.Node = node; t.isMemberExpression(n); n = n.object) {
+		if (plan.propertyReads.has(spanKey(n))) return true;
+	}
+	return false;
 }
 
 /** Local name of an injected runtime helper. */
@@ -648,6 +730,15 @@ export function rewriteMatch(
 		node.source?.value === plan.moduleSpecifier
 	) {
 		return { ...node, source: str(RUNTIME_MODULE) } as t.Node;
+	}
+
+	const wrap = plan.wraps.get(spanKey(node));
+	if (wrap) {
+		const out = rewriteWrap(node, wrap, r, state);
+		if (out) {
+			consume(node);
+			return out;
+		}
 	}
 
 	if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
