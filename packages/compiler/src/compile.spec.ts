@@ -69,14 +69,13 @@ function parity(name: string, body: string) {
 async function compileWithPlugin(
 	source: string,
 	warn: (m: string) => void = () => {},
-	modules?: "all" | "sobx",
 ): Promise<string> {
 	const result = await transform(
 		source,
 		"/src/file.ts",
 		resolveOptions({
 			parserOptions: { plugins: [...PARSER_PLUGINS] },
-			transformer: [SobxTransformer({ warn, modules })],
+			transformer: [SobxTransformer({ warn })],
 		}),
 	);
 	return result?.code ?? source;
@@ -134,10 +133,7 @@ s.inc?.();`);
 		const out = compile(`const store = observable({ count: 0 });
 function f(store) { return store.count; }
 store.count;`);
-		// The parameter isn't the ProxyLike: it's a value whose origin can't be traced.
-		expect(out).toContain(
-			'return store[__sobx_$sobx] !== void 0 ? __sobx_getProperty(store, "count") : store.count;',
-		);
+		expect(out).toContain("return store.count;");
 		expect(out).toContain('store.get("count");');
 	});
 
@@ -389,10 +385,10 @@ todos.reset();`),
 			codes(
 				`const s = observable({ a: 1 }); log(s); Object.assign(s, { b: 1 });`,
 			),
-		).toContainEqual(["unsupported-operation", "error"]);
+		).toContainEqual(["unsupported-operation", "info"]);
 		expect(
 			codes(`const s = observable({ items: [1] }); s.items[next()] += 1;`),
-		).toContainEqual(["uncompiled-write", "error"]);
+		).toContainEqual(["uncompiled-write", "info"]);
 		// Rewritten operations are not reported.
 		expect(
 			codes(
@@ -655,16 +651,6 @@ store.count += 1;`);
 		expect(out).not.toMatch(/store\.count/);
 	});
 
-	it("rewrites `in` (binary expressions are visited)", async () => {
-		const out =
-			await compileWithPlugin(`import { observable } from "@sobx/magic";
-export const s = observable({ a: 1 });
-function f(o, k) { return k in o; }
-log("b" in s);`);
-		expect(out).toContain("__sobx_hasProperty(o, k)");
-		expect(out).toContain('__sobx_hasProperty(s, "b")');
-	});
-
 	it("keeps comments around rewritten nodes once", async () => {
 		const out = await compileWithPlugin(`/** header */
 import { observable } from "@sobx/magic";
@@ -718,15 +704,8 @@ autorun(() => { s.a = 2; });`,
 		]);
 	});
 
-	it('skips files without sobx usages with modules: "sobx"', async () => {
+	it("skips files without sobx usages", async () => {
 		const source = `import { observable } from "mobx";\nconst s = observable({ a: 1 });\ns.a;`;
-		expect(await compileWithPlugin(source, undefined, "sobx")).toBe(source);
-	});
-
-	it("compiles every module by default", async () => {
-		const out = await compileWithPlugin(
-			"export function count(o) { return Object.keys(o).length; }",
-		);
-		expect(out).toContain("__sobx_keysOf(o)");
+		expect(await compileWithPlugin(source)).toBe(source);
 	});
 });

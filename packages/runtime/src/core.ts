@@ -25,11 +25,15 @@ export interface VersionedComputed {
 /** One observable slot that derivations can depend on. */
 export class Dep {
 	readonly observers = new Set<Derivation>();
+	/** The last derivation run that read it ({@link Tracking.id}), to record each read once. */
+	seen = 0;
 	constructor(readonly owner?: VersionedComputed) {}
 }
 
 /** What a running derivation has read so far. */
 export interface Tracking {
+	/** Identifies this run. */
+	readonly id: number;
 	deps: Set<Dep>;
 	/** Computed dependencies and the version that was read (created on first computed read). */
 	versions: Map<VersionedComputed, number> | null;
@@ -47,10 +51,10 @@ export const globalState = {
 	/** Like MobX's `configure({ enforceActions })`. Checked in development builds only. */
 	enforceActions: "observed" as EnforceActions,
 	/**
-	 * `configure({ useProxies: "always" })`: new observable objects and arrays are created behind
-	 * a `Proxy`, so code the compiler doesn't process is observed too (see `proxies.ts`).
+	 * Put observable objects and arrays behind a `Proxy` (see `proxies.ts`), as MobX does:
+	 * `configure({ useProxies })`.
 	 */
-	useProxies: false,
+	useProxies: true,
 };
 
 // The runtime targets any JS environment.
@@ -84,19 +88,6 @@ export function checkWriteIf(observed: boolean, what: string): void {
 	console.warn(
 		`[sobx] Since enforceActions is "${mode}", ${mode === "observed" ? "observed " : ""}observable values must be changed inside actions (action, runInAction, flow). Tried to modify: ${what}`,
 	);
-}
-
-/**
- * Present (`true`) on the values whose properties the compiler helpers handle differently from
- * plain JavaScript: observable arrays, `ProxyLike`s and accessor-based observable objects and
- * classes. Compiled writes check it inline (`o[$sobx] !== undefined ? setProperty(...) : ...`),
- * so writes to plain values run as they are.
- */
-export const $sobx: unique symbol = Symbol("sobx");
-
-/** Mark `target` (an object or a prototype) with {@link $sobx}. */
-export function markObservable(target: object): void {
-	Object.defineProperty(target, $sobx, { value: true });
 }
 
 /** Every observable value (arrays, objects, Maps, Sets, boxes, ProxyLike, classes). */
@@ -142,10 +133,10 @@ export function convertingTo<T>(
 
 /**
  * Something that holds an observable value (an object property, a box, a Map value, an array
- * element). sobx never uses `Proxy`, so some reads of a held value can't be tracked by the value
- * itself (`array.length`, `array[i]`, a key that doesn't exist yet). Instead, the value tells its
- * owners when it changes, and they notify whoever read it through them: a derivation that read
- * `store.items` re-runs when `store.items` is mutated, whatever it did with the array.
+ * element). Without proxies (`useProxies: "never"`, `proxy: false`), some reads of a held value
+ * can't be tracked by the value itself (`array.length`, `array[i]`, a key that doesn't exist
+ * yet). Such a value tells its owners when it changes, and they notify whoever read it through
+ * them: a derivation that read `store.items` re-runs when `store.items` is mutated.
  */
 export interface Owner {
 	ownerChanged(): void;
@@ -159,11 +150,12 @@ const ownersOf = new WeakMap<object, Set<Owner>>();
 export function adopt(value: unknown, owner: Owner): void {
 	if (typeof value !== "object" || value === null) return;
 	if (!observableValues.has(value)) return;
-	const key = rawOf(value);
-	let owners = ownersOf.get(key);
+	// A proxied value tracks every read itself; its owners have nothing to add.
+	if (proxyTargets.has(value)) return;
+	let owners = ownersOf.get(value);
 	if (!owners) {
 		owners = new Set();
-		ownersOf.set(key, owners);
+		ownersOf.set(value, owners);
 	}
 	owners.add(owner);
 }
@@ -171,12 +163,12 @@ export function adopt(value: unknown, owner: Owner): void {
 /** Record that `owner` no longer holds `value`. */
 export function release(value: unknown, owner: Owner): void {
 	if (typeof value !== "object" || value === null) return;
-	ownersOf.get(rawOf(value))?.delete(owner);
+	ownersOf.get(value)?.delete(owner);
 }
 
 /** Whether anything observes `value` through one of its owners. */
 export function ownersObserved(value: object): boolean {
-	const owners = ownersOf.get(rawOf(value));
+	const owners = ownersOf.get(value);
 	if (!owners) return false;
 	for (const owner of owners) if (owner.ownerObserved()) return true;
 	return false;
@@ -186,7 +178,6 @@ let notifying: Set<object> | null = null;
 
 /** Tell `value`'s owners that it changed (cycle-safe). */
 export function notifyOwners(value: object): void {
-	value = rawOf(value);
 	const owners = ownersOf.get(value);
 	if (!owners || owners.size === 0) return;
 	const outer = notifying === null;
@@ -214,17 +205,25 @@ export const hooks = {
 	proxy: <T extends object>(raw: T, _kind: "object" | "array"): T => raw,
 };
 
-/** Proxies of observables (`useProxies`) and the observable behind each. */
-export const proxyTargets = new WeakMap<object, object>();
+/** The observable behind each proxy, and the proxy in front of each observable. */
+const proxyTargets = new WeakMap<object, object>();
+const proxies = new WeakMap<object, object>();
 
 /** The observable behind `value` if it's a proxy of one, else `value`. */
-export function rawOf(value: object): object {
-	return proxyTargets.get(value) ?? value;
+export function rawOf<T>(value: T): T {
+	return typeof value === "object" && value !== null
+		? ((proxyTargets.get(value) as T | undefined) ?? value)
+		: value;
+}
+
+/** The proxy in front of `raw` if it has one, else `raw`: what user code must see as `this`. */
+export function proxyOf<T extends object>(raw: T): T {
+	return (proxies.get(raw) as T | undefined) ?? raw;
 }
 
 /**
- * Put a new observable behind a proxy if `useProxies` is on (registered as observable too).
- * Runtime internals keep using `raw`.
+ * Put a new observable behind a proxy (if `useProxies` is on). Runtime internals only ever work
+ * on `raw`, so that traps only run for user code.
  */
 export function maybeProxy<T extends object>(
 	raw: T,
@@ -234,6 +233,7 @@ export function maybeProxy<T extends object>(
 	const proxy = hooks.proxy(raw, kind);
 	if (proxy !== raw) {
 		proxyTargets.set(proxy, raw);
+		proxies.set(raw, proxy);
 		observableValues.add(proxy);
 	}
 	return proxy;
@@ -249,7 +249,11 @@ const MAX_ITERATIONS = 100;
 
 /** Record a read of `dep` in the running derivation. */
 export function reportObserved(dep: Dep): void {
-	globalState.tracking?.deps.add(dep);
+	const tracking = globalState.tracking;
+	if (tracking !== null && dep.seen !== tracking.id) {
+		dep.seen = tracking.id;
+		tracking.deps.add(dep);
+	}
 }
 
 /** Schedule a reaction to run when the outermost batch ends. */
@@ -305,7 +309,7 @@ export function track<T>(
 	fn: () => T,
 ): { value: T; tracking: Tracking } {
 	const outer = globalState.tracking;
-	const tracking: Tracking = { deps: new Set(), versions: null };
+	const tracking = emptyTracking();
 	globalState.tracking = tracking;
 	try {
 		return { value: fn(), tracking };
@@ -331,8 +335,10 @@ export function rebind(
 	}
 }
 
+let lastTracking = 0;
+
 export function emptyTracking(): Tracking {
-	return { deps: new Set(), versions: null };
+	return { id: ++lastTracking, deps: new Set(), versions: null };
 }
 
 /** Whether any computed read by a derivation has changed since it was read. */

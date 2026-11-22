@@ -1,16 +1,19 @@
 import { enhance } from "./collections.js";
 import {
 	adopt,
-	checkWrite,
+	checkWriteIf,
+	DEV,
 	Dep,
 	type Equals,
+	endBatch,
 	globalState,
-	markObservable,
 	type Owner,
 	observableValues,
 	release,
 	reportChanged,
+	reportObserved,
 	runAction,
+	startBatch,
 } from "./core.js";
 
 /** Options for {@link ProxyLike}. Emitted by the sobx compiler. */
@@ -124,8 +127,7 @@ export class ProxyLike<T extends object> {
 			dep = new Dep();
 			this.deps.set(key, dep);
 		}
-		// biome-ignore lint/style/noNonNullAssertion: only called while tracking
-		globalState.tracking!.deps.add(dep);
+		reportObserved(dep);
 	}
 
 	/** The {@link Owner} for values held under `key`: notifies `key`'s readers. */
@@ -145,10 +147,35 @@ export class ProxyLike<T extends object> {
 		return owner;
 	}
 
-	/** Track the set of keys (for `keys()` / `has()` on keys added later). */
-	private observeKeys(): void {
+	/** @internal Track the set of keys. */
+	observeKeys(): void {
+		if (globalState.tracking === null) return;
 		this.keysDep ??= new Dep();
-		globalState.tracking?.deps.add(this.keysDep);
+		reportObserved(this.keysDep);
+	}
+
+	/** @internal {@link get} for stores without getters. */
+	read(key: keyof T): unknown {
+		if (globalState.tracking !== null) this.observe(key);
+		return this.target[key];
+	}
+
+	/** @internal Whether `key` is in the store (untracked). */
+	owns(key: keyof T): boolean {
+		return Object.hasOwn(this.target, key);
+	}
+
+	/** @internal Notify everything that depends on `key` or on the set of keys. */
+	keyRedefined(key: keyof T): void {
+		startBatch();
+		try {
+			const dep = this.deps?.get(key);
+			if (dep) reportChanged(dep);
+			if (this.keysDep) reportChanged(this.keysDep);
+			this.presenceChanged(key);
+		} finally {
+			endBatch();
+		}
 	}
 
 	/**
@@ -156,7 +183,7 @@ export class ProxyLike<T extends object> {
 	 * re-runs what read them.
 	 */
 	keys(): Array<keyof T & string> {
-		if (globalState.tracking !== null) this.observeKeys();
+		this.observeKeys();
 		const target = this.target as Record<string, unknown>;
 		return Object.keys(target).filter(
 			(key) =>
@@ -176,9 +203,19 @@ export class ProxyLike<T extends object> {
 				dep = new Dep();
 				this.presenceDeps.set(key, dep);
 			}
-			globalState.tracking.deps.add(dep);
+			reportObserved(dep);
 		}
 		return Object.hasOwn(this.target, key);
+	}
+
+	/** Whether anything observes `key` (or, for added keys, its presence or the set of keys). */
+	private keyObserved(key: keyof T, added: boolean): boolean {
+		if ((this.deps?.get(key)?.observers.size ?? 0) > 0) return true;
+		return (
+			added &&
+			((this.keysDep?.observers.size ?? 0) > 0 ||
+				(this.presenceDeps?.get(key)?.observers.size ?? 0) > 0)
+		);
 	}
 
 	/** Tell `has(key)` readers that `key` was added or deleted. */
@@ -293,19 +330,24 @@ export class ProxyLike<T extends object> {
 			}
 		}
 
-		this.scopedObservers.get(key)?.forEach((observer) => {
-			observer(key, previous, value);
-		});
-		this.globalObservers.forEach((observer) => {
-			observer(key, previous, value);
-		});
+		if (this.scopedObservers.size > 0) {
+			this.scopedObservers.get(key)?.forEach((observer) => {
+				observer(key, previous, value);
+			});
+		}
+		if (this.globalObservers.size > 0) {
+			this.globalObservers.forEach((observer) => {
+				observer(key, previous, value);
+			});
+		}
 
 		const dep = this.deps?.get(key);
 		const equals = this.equalsByKey?.get(key) ?? Object.is;
-		if (!equals(previous, value)) {
-			checkWrite(dep, String(key));
-			if (dep) reportChanged(dep);
+		const changed = !equals(previous, value);
+		if (DEV && (changed || isNewKey)) {
+			checkWriteIf(this.keyObserved(key, isNewKey), String(key));
 		}
+		if (changed && dep) reportChanged(dep);
 		if (isNewKey) {
 			if (this.keysDep) reportChanged(this.keysDep);
 			this.presenceChanged(key);
@@ -331,11 +373,16 @@ export class ProxyLike<T extends object> {
 	/** Deletes a property and notifies observers, like `delete target[key]`. */
 	delete<K extends keyof T>(key: K): boolean {
 		if (!Object.hasOwn(this.target, key)) return true;
-		this.set(key, undefined as T[K]);
+		checkWriteIf(this.keyObserved(key, true), String(key));
+		globalState.allowStateChanges++; // checked above
+		try {
+			this.set(key, undefined as T[K]);
+		} finally {
+			globalState.allowStateChanges--;
+		}
 		const deleted = delete this.target[key];
 		if (this.keysDep) reportChanged(this.keysDep);
 		this.presenceChanged(key);
 		return deleted;
 	}
 }
-markObservable(ProxyLike.prototype);

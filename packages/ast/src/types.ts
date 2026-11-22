@@ -10,7 +10,7 @@
  */
 
 /** Version of the IR shape. Bump on breaking changes to these types. */
-export const IR_VERSION = 5;
+export const IR_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -66,41 +66,6 @@ export interface SobxModule {
 	/** API usages that were recognized but are not (yet) modeled. */
 	unsupported: UnsupportedUsage[];
 	diagnostics: Diagnostic[];
-	/**
-	 * Property operations that only a `Proxy` would observe, on values whose origin can't be
-	 * traced (parameters, imports, call results...), which may be observables.
-	 */
-	untracedOperations: UntracedOperation[];
-}
-
-/**
- * A property operation that only a `Proxy` would observe (a dynamic key, an array index or
- * `length`, a write, `delete`, `in`, `Object.keys` / `values` / `entries`) on a value whose
- * origin the analyzer can't trace, so it may be an observable.
- */
-export interface UntracedOperation {
-	/**
-	 * `read` / `write` / `delete`: of the member at `span`. `in` / `enumerate`: the expression at
-	 * `span`. `keys`: the object spread / JSX spread attribute / `for...in` at `span` enumerates
-	 * its value's keys. Calls at `span`: `assign` (`Object.assign`), `keys-arg`
-	 * (`Object.getOwnPropertyNames` / `getOwnPropertySymbols`, `Reflect.ownKeys`), `deep-arg`
-	 * (`JSON.stringify`, `structuredClone`: everything reachable from the first argument),
-	 * `has-own` (`Object.hasOwn`, `o.hasOwnProperty(k)`, `Object.prototype.hasOwnProperty.call`).
-	 */
-	kind:
-		| "read"
-		| "write"
-		| "delete"
-		| "in"
-		| "enumerate"
-		| "keys"
-		| "assign"
-		| "keys-arg"
-		| "deep-arg"
-		| "has-own";
-	key: AccessKey;
-	/** Offsets only (no line / column). */
-	span: Pick<Span, "start" | "end">;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,10 +225,7 @@ export type ObservableSource =
 	| "observable"
 	| "makeObservable"
 	| "makeAutoObservable"
-	| "decorators"
-	/** `@sobx/react`'s hooks (a runtime observable made from the initializer's result). */
-	| "useLocalObservable"
-	| "useLocalStore";
+	| "decorators";
 
 interface ObservableBase {
 	kind: "Observable";

@@ -3,7 +3,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-pub const IR_VERSION: u32 = 5;
+pub const IR_VERSION: u32 = 4;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq)]
 pub struct Position {
@@ -39,27 +39,6 @@ pub struct Module {
     pub actions: Vec<Action>,
     pub unsupported: Vec<UnsupportedUsage>,
     pub diagnostics: Vec<Diagnostic>,
-    pub untraced_operations: Vec<UntracedOperation>,
-}
-
-/// A property operation that only a `Proxy` would observe, on a value whose origin the
-/// analyzer can't trace (a parameter, an import, a call result...): it may be an observable.
-#[derive(Serialize)]
-pub struct UntracedOperation {
-    /// `read` / `write` / `delete`: the member at `span`; `in` / `enumerate`: the expression.
-    pub kind: &'static str,
-    pub key: AccessKey,
-    /// Offsets only (there can be many of these; the compiler matches them by offset).
-    #[serde(serialize_with = "offsets")]
-    pub span: Span,
-}
-
-fn offsets<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
-    use serde::ser::SerializeStruct;
-    let mut s = serializer.serialize_struct("Offsets", 2)?;
-    s.serialize_field("start", &span.start)?;
-    s.serialize_field("end", &span.end)?;
-    s.end()
 }
 
 // Variant names are the IR's JSON `kind` tags.

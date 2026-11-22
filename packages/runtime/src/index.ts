@@ -1,22 +1,18 @@
 import "./proxies.js";
 
 export {
-	assignProperties,
 	deleteProperty,
 	entries,
 	entriesOf,
 	get,
 	getProperty,
 	has,
-	hasOwnKey,
 	hasProperty,
 	keys,
 	keysOf,
 	remove,
 	set,
 	setProperty,
-	trackDeep,
-	trackKeys,
 	updateProperty,
 	values,
 	valuesOf,
@@ -41,11 +37,9 @@ export {
 } from "./collections.js";
 export { Computed, type ComputedOptions } from "./computed.js";
 export {
-	$sobx,
 	batch,
 	currentTracking,
 	type EnforceActions,
-	globalState,
 	untracked,
 } from "./core.js";
 export {

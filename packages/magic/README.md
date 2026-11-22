@@ -8,7 +8,7 @@ The MobX-compatible API you write sobx code against. Its exports are placeholder
 
 Switch your imports from `"mobx"` to `"@sobx/magic"` and add the compiler to your build. MobX code using observable objects, arrays, Maps, Sets and boxes (deep by default), classes (`makeObservable` / `makeAutoObservable` / standard decorators), `computed`, `reaction`, `autorun`, `when`, actions, `flow`, `toJS` and `configure` works unchanged.
 
-sobx doesn't need `Proxy`. The compiler (which processes every module of your app) turns the operations MobX observes through proxies (adding / deleting keys, keys that don't exist yet, `in`, `Object.keys`, spreads, `for...in`, `JSON.stringify`, dynamic keys, array index and `length` reads and writes) into runtime calls: on the observables it sees created, and on values whose origin it can't trace (parameters, imports, call results), which may be observables (the runtime calls behave as plain JavaScript otherwise). For code the compiler doesn't process (libraries), `configure({ useProxies: "always" })` puts observables behind a `Proxy`, as MobX does. sobx also has an explicit API: **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**, and `array.set(i, v)` / `array.setLength(n)`.
+Local observable objects whose every use the compiler can see are compiled to direct `get` / `set` calls, with no `Proxy`. Every other observable object or array is behind a `Proxy`, as in MobX, so any code using it is observed, compiled or not. `configure({ useProxies: "never" })` turns proxies off (see [what's supported](../../docs/support.md#without-proxies)).
 
 A few MobX APIs aren't implemented (`extendObservable`, `observe` / `intercept`, `spy` / `trace`, legacy decorators, reaction schedulers). For React, switch `"mobx-react"` / `"mobx-react-lite"` imports to [`@sobx/react`](../react). The compiler fails the build on anything it doesn't support, so nothing breaks silently. See [what's supported](../../docs/support.md) for the full list.
 
@@ -27,7 +27,7 @@ pnpm add -D @sobx/compiler
 - **`computed(fn, options?)`**, plus `computed.struct`
 - **`reaction(data, effect, options?)`**, **`autorun(fn)`**, **`when(predicate, effect?, options?)`**
 - **`action(fn)`** / **`action(name, fn)`**, plus `action.bound`; **`runInAction(fn)`**; **`flow(generator)`**, plus `flow.bound`
-- **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**: the explicit API (same names and semantics as MobX's object API functions)
+- **`set`**, **`remove`**, **`has`**, **`get`**, **`keys`**, **`values`**, **`entries`**: MobX's object API
 - **`comparer`** (`default`, `identity`, `structural`, `shallow`), **`toJS`**, **`configure`**, **`untracked`**
 - **`isObservable`**, **`isObservableArray`**, **`isObservableObject`**, **`isObservableMap`**, **`isObservableSet`**, **`isBoxedObservable`**, **`isComputed`**, **`isAction`**, **`isFlowCancellationError`**
 - **`makeObservable(target, annotations, options?)`**, **`makeAutoObservable(target, overrides?, options?)`**
@@ -69,19 +69,21 @@ runInAction(() => {
 
 Runtime comparison (MobX vs the same code compiled by sobx), same workload in `node:vm` (with the APIs passed as local bindings, like a module's imports), 500k iterations, 5 rounds (median), `NODE_ENV=production`, MobX `enforceActions: "always"`. Run via [`packages/bench`](../bench).
 
-| Fixture | MobX (ms) | sobx (ms) | sobx vs MobX |
+| Fixture | MobX (ms) | sobx (ms) | |
 |---|---|---|---|
-| combined-reaction-on-name | 361.60 | 93.04 | **288.6% faster** |
-| counter-increment | 346.48 | 73.59 | **370.9% faster** |
-| multiple-reactions | 354.83 | 87.52 | **305.4% faster** |
-| observable-writes-only | 90.81 | 22.77 | **298.7% faster** |
-| runtime-object-reaction | 410.54 | 142.19 | **188.7% faster** |
-| sync-effect | 358.84 | 94.12 | **281.3% faster** |
-| plain-code-in-compiled-module | 62.60 | 65.27 | 4.3% slower |
-| plain-code-in-derivation | 60.08 | 68.73 | 14.4% slower |
+| counter-increment | 368.1 | 69.4 | **5.3x faster** |
+| observable-writes-only | 94.9 | 20.1 | **4.7x faster** |
+| multiple-reactions | 372.7 | 82.4 | **4.5x faster** |
+| combined-reaction-on-name | 376.9 | 90.1 | **4.2x faster** |
+| sync-effect | 366.1 | 91.3 | **4.0x faster** |
+| runtime-object-reaction | 417.6 | 153.7 | **2.7x faster** |
+| runtime-list-render | 113.2 | 109.2 | about the same |
+| runtime-dynamic-keys | 197.6 | 193.0 | about the same |
 
-`runtime-object-reaction` uses an observable passed around, so it's an accessor-based object at runtime rather than the compiled fast path; with `configure({ useProxies: "always" })` it takes 239.70 ms (still 67% faster than MobX). The last two measure what the compiler's rewrites cost on plain values: a loop of property and index / `length` reads, dynamic-key writes and `Object.keys` on plain arrays and objects reached through parameters (which could be observables, so they're rewritten), outside any reaction and inside an `autorun` (as in an observer render). The MobX column runs the same code uncompiled.
+(Median of three runs.) The first five use the compiled fast path. The `runtime-*` fixtures use a store that is passed around, so it's behind a `Proxy` in both libraries: writes observed by a reaction, a list rendered by index inside a derivation, and an object used as a dictionary.
 
-Earlier versions of this table (MobX 460–513 ms, sobx 108–197 ms) ran the fixtures with the APIs as `node:vm` globals, whose lookups are slow; the bench now passes them as local bindings, as a module's imports are. The bigger ratios come from that harness change, not from a faster runtime.
+Plain data costs nothing: `plain-code-in-compiled-module` and `plain-code-in-derivation` run code with no observables, as it is and compiled (60.8 vs 61.9 ms and 61.6 vs 61.4 ms, i.e. noise: the compiler doesn't touch it).
+
+Earlier versions of this table ran the fixtures with the APIs as `node:vm` globals, whose lookups are slow; the bench now passes them as local bindings, as a module's imports are. Part of the difference with older figures comes from that.
 
 These numbers are with full MobX semantics: tracked dependencies, batching, equality checks. Earlier, faster figures came from an inlined reaction that didn't behave like MobX.

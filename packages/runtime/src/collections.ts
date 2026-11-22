@@ -1,7 +1,7 @@
 /**
  * Observable arrays, boxes, Maps and Sets, plus `comparer`, and {@link enhance}: how deep
  * observables convert the values put into them (plain objects, arrays, Maps and Sets become
- * observable, as in MobX). No `Proxy` is used anywhere.
+ * observable, as in MobX). Arrays are normally behind a `Proxy` (see `proxies.ts`).
  */
 import {
 	adopt,
@@ -15,14 +15,15 @@ import {
 	endBatch,
 	globalState,
 	hooks,
-	markObservable,
 	maybeProxy,
 	notifyOwners,
 	type Owner,
 	observableValues,
 	ownersObserved,
+	rawOf,
 	release,
 	reportChanged,
+	reportObserved,
 	startBatch,
 } from "./core.js";
 
@@ -98,7 +99,7 @@ const enhancerOf = (deep: boolean) =>
 	deep ? <T>(value: T): T => enhance(value) : identity;
 
 function observe(dep: Dep): void {
-	globalState.tracking?.deps.add(dep);
+	reportObserved(dep);
 }
 
 function batched(fn: () => void): void {
@@ -161,15 +162,14 @@ const arrayPrototype = Array.prototype as unknown as Record<
 >;
 
 /**
- * An observable array: a real `Array` (a subclass, never a `Proxy`), so `Array.isArray`,
- * `JSON.stringify`, spreading and libraries keep working. Like MobX, it is tracked as a whole:
- * every reading method and iteration depends on it, every mutating method notifies once.
+ * An observable array: a real `Array` (a subclass), so `Array.isArray`, `JSON.stringify`,
+ * spreading and libraries keep working. Like MobX, it is tracked as a whole: every read depends
+ * on it, every mutating method notifies once. It's normally behind a `Proxy` (see `proxies.ts`),
+ * which observes `array.length` and `array[i]`; methods run on the array itself.
  *
- * `array.length` and `array[i]` are plain properties and can't be observed. Reads through an
- * observable property are still tracked (the array notifies its owners: `store.items.length`
- * re-runs when `store.items` changes), and the sobx compiler turns index and `length` writes it
- * can follow into {@link ObservableArray.set} / {@link ObservableArray.setLength}. Elsewhere,
- * use `get(i)`, `set(i, value)`, `setLength(n)` or the methods.
+ * Without a proxy (`useProxies: "never"`), `array.length` and `array[i]` are plain properties:
+ * reads through an observable property are still tracked (the array notifies its owners), and
+ * writes need {@link ObservableArray.set} / {@link ObservableArray.setLength} or a method.
  */
 export class ObservableArray<T> extends Array<T> {
 	/** Derived arrays (`map`, `filter`, `slice`, ...) are plain arrays. */
@@ -179,61 +179,81 @@ export class ObservableArray<T> extends Array<T> {
 
 	/** Read element `index` (tracked). */
 	get(index: number): T | undefined {
-		const adm = administrationOf(this);
+		const self = rawOf(this);
+		const adm = administrationOf(self);
 		if (adm) observe(adm.dep);
-		return this[index];
+		return self[index];
 	}
 
 	/** Write element `index` (notifies), like `array[index] = value`. */
 	set(index: number, value: T): T {
-		const adm = administrationOf(this);
+		const self = rawOf(this);
+		const adm = administrationOf(self);
 		if (!adm) {
-			this[index] = value;
+			self[index] = value;
 			return value;
 		}
 		if (!Number.isInteger(index) || index < 0) {
 			throw new RangeError(`sobx: invalid array index ${index}.`);
 		}
 		const next = adm.prepare(value);
-		if (index < this.length && Object.is(this[index], next)) return next;
-		checkArrayWrite(this, adm);
-		release(this[index], adm.owner);
-		this[index] = next;
+		if (index < self.length && Object.is(self[index], next)) return next;
+		checkArrayWrite(self, adm);
+		release(self[index], adm.owner);
+		self[index] = next;
 		adopt(next, adm.owner);
-		arrayChanged(this, adm);
+		arrayChanged(self, adm);
 		return next;
 	}
 
 	/** Set the length (notifies), like `array.length = length`. */
 	setLength(length: number): number {
-		const adm = administrationOf(this);
-		if (!adm || this.length === length) {
-			this.length = length;
+		const self = rawOf(this);
+		const adm = administrationOf(self);
+		if (!adm || self.length === length) {
+			self.length = length;
 			return length;
 		}
-		checkArrayWrite(this, adm);
-		for (let i = length; i < this.length; i++) release(this[i], adm.owner);
-		this.length = length;
-		arrayChanged(this, adm);
+		checkArrayWrite(self, adm);
+		for (let i = length; i < self.length; i++) release(self[i], adm.owner);
+		self.length = length;
+		arrayChanged(self, adm);
 		return length;
 	}
 
 	/** @internal `delete array[index]` (leaves a hole; notifies). */
 	deleteIndex(index: number): boolean {
-		const adm = administrationOf(this);
-		if (!adm || !Object.hasOwn(this, index)) return delete this[index];
-		checkArrayWrite(this, adm);
-		release(this[index], adm.owner);
-		delete this[index];
-		arrayChanged(this, adm);
+		const self = rawOf(this);
+		const adm = administrationOf(self);
+		if (!adm || !Object.hasOwn(self, index)) return delete self[index];
+		checkArrayWrite(self, adm);
+		release(self[index], adm.owner);
+		delete self[index];
+		arrayChanged(self, adm);
 		return true;
 	}
+
+	/** @internal `Object.defineProperty(array, key, descriptor)` (notifies). */
+	defineKey(key: PropertyKey, descriptor: PropertyDescriptor): boolean {
+		const self = rawOf(this);
+		const adm = administrationOf(self);
+		if (adm) checkArrayWrite(self, adm);
+		const defined = Reflect.defineProperty(self, key, descriptor);
+		if (adm && defined) arrayChanged(self, adm);
+		return defined;
+	}
 }
-markObservable(ObservableArray.prototype);
+
+/** @internal {@link observeArray} for the array itself (not a proxy of it). */
+export function observeRawArray(array: ObservableArray<unknown>): void {
+	if (globalState.tracking === null) return;
+	const adm = administrationOf(array);
+	if (adm) reportObserved(adm.dep);
+}
 
 /** @internal Depend on an observable array (as its reading methods do). */
 export function observeArray(array: ObservableArray<unknown>): void {
-	const adm = administrationOf(array);
+	const adm = administrationOf(rawOf(array));
 	if (adm) observe(adm.dep);
 }
 
@@ -266,18 +286,19 @@ function defineMutator(
 	const builtin = arrayPrototype[name] as (...args: unknown[]) => unknown;
 	Object.defineProperty(ObservableArray.prototype, name, {
 		value: function (this: ObservableArray<unknown>, ...args: unknown[]) {
-			const adm = administrationOf(this);
-			if (!adm) return builtin.apply(this, args);
-			checkArrayWrite(this, adm);
+			const self = rawOf(this);
+			const adm = administrationOf(self);
+			if (!adm) return builtin.apply(self, args);
+			checkArrayWrite(self, adm);
 			let outcome!: { result: unknown; changed: boolean };
 			startBatch();
 			try {
-				outcome = run(this, adm, args);
-				if (outcome.changed) arrayChanged(this, adm);
+				outcome = run(self, adm, args);
+				if (outcome.changed) arrayChanged(self, adm);
 			} finally {
 				endBatch();
 			}
-			return outcome.result;
+			return outcome.result === self ? this : outcome.result;
 		},
 		writable: true,
 		configurable: true,
@@ -355,7 +376,23 @@ defineMutator("copyWithin", (array, _adm, args) => {
 	return { result: array, changed: array.length > 0 };
 });
 
-// Reading methods depend on the array (`length` and `[i]` can't; see ObservableArray).
+/** Methods taking a callback, and which of its arguments is the array. */
+const CALLBACK_ARRAY_ARGUMENT: Record<string, number | undefined> = {
+	every: 2,
+	filter: 2,
+	find: 2,
+	findIndex: 2,
+	findLast: 2,
+	findLastIndex: 2,
+	flatMap: 2,
+	forEach: 2,
+	map: 2,
+	reduce: 3,
+	reduceRight: 3,
+	some: 2,
+};
+
+// Reading methods depend on the array.
 for (const name of [
 	"at",
 	"concat",
@@ -390,11 +427,22 @@ for (const name of [
 ] as PropertyKey[]) {
 	const builtin = arrayPrototype[name];
 	if (typeof builtin !== "function") continue;
+	const arrayArgument = CALLBACK_ARRAY_ARGUMENT[name as string];
 	Object.defineProperty(ObservableArray.prototype, name, {
 		value: function (this: ObservableArray<unknown>, ...args: unknown[]) {
-			const adm = administrationOf(this);
+			const self = rawOf(this);
+			const adm = administrationOf(self);
 			if (adm) observe(adm.dep);
-			return builtin.apply(this, args);
+			const callback = args[0];
+			if (self !== this && arrayArgument && typeof callback === "function") {
+				// Callbacks get the array (last argument): the proxy, not the array behind it.
+				const array = this;
+				args[0] = function (this: unknown, ...values: unknown[]) {
+					values[arrayArgument] = array;
+					return callback.apply(this, values);
+				};
+			}
+			return builtin.apply(self, args);
 		},
 		writable: true,
 		configurable: true,
@@ -524,7 +572,7 @@ export class ObservableMap<K, V> extends Map<K, V> {
 			dep = new Dep();
 			this.keyDeps.set(key, dep);
 		}
-		globalState.tracking.deps.add(dep);
+		reportObserved(dep);
 	}
 
 	private check(key: K): void {
@@ -559,7 +607,7 @@ export class ObservableMap<K, V> extends Map<K, V> {
 				dep = new Dep();
 				this.hasDeps.set(key, dep);
 			}
-			globalState.tracking.deps.add(dep);
+			reportObserved(dep);
 		}
 		return super.has(key);
 	}
@@ -679,7 +727,7 @@ export class ObservableSet<T> extends Set<T> {
 				dep = new Dep();
 				this.valueDeps.set(value, dep);
 			}
-			globalState.tracking.deps.add(dep);
+			reportObserved(dep);
 		}
 		return super.has(value);
 	}

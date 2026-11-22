@@ -6,6 +6,7 @@ import {
 	emptyTracking,
 	globalState,
 	rebind,
+	reportObserved,
 	type Tracking,
 	track,
 	type VersionedComputed,
@@ -58,7 +59,7 @@ export class Computed<T> implements Derivation, VersionedComputed {
 		}
 		this.refresh();
 		if (outer !== null) {
-			outer.deps.add(this.dep);
+			reportObserved(this.dep);
 			outer.versions ??= new Map();
 			outer.versions.set(this, this.version);
 		}

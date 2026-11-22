@@ -3,11 +3,11 @@
  * `makeAutoObservable()`, the annotations (`observable.ref`, `computed.struct`,
  * `action.bound`, ...), and standard (2022.3) decorators.
  *
- * Observable properties become accessors backed by a {@link ProxyLike} (sobx never uses `Proxy`).
- * Keys added later go through the explicit API (`set`, `remove`, `has`, `keys`; see `api.ts`),
- * which the compiler emits for code it can see. Deep observables convert the values put into them
- * (plain objects, arrays, Maps and Sets). This is the general path; the sobx compiler turns local
- * object observables it can fully see into a plain `ProxyLike` instead.
+ * Observable properties become accessors backed by a {@link ProxyLike}. `observable()` objects are
+ * behind a `Proxy` (see `proxies.ts`), which observes everything else; class instances aren't, as
+ * in MobX. Deep observables convert the values put into them (plain objects, arrays, Maps and
+ * Sets). This is the general path; the sobx compiler turns local object observables it can fully
+ * see into a plain `ProxyLike` instead.
  */
 
 import { createFlow, type FlowPromise } from "./async.js";
@@ -34,10 +34,11 @@ import {
 	endBatch,
 	globalState,
 	hooks,
-	markObservable,
 	maybeProxy,
 	notifyOwners,
 	observableValues,
+	proxyOf,
+	rawOf,
 	runAction,
 	startBatch,
 } from "./core.js";
@@ -52,6 +53,8 @@ export interface Annotation {
 	modifier?: "deep" | "ref" | "shallow" | "struct";
 	/** `action.bound`, or `autoBind`. */
 	bound?: boolean;
+	/** Inferred (by `observable()` / `makeAutoObservable()`), rather than given. */
+	inferred?: boolean;
 }
 
 export interface ObservableOptions {
@@ -64,7 +67,7 @@ export interface ObservableOptions {
 	deep?: boolean;
 	/** For debugging; not used. */
 	name?: string;
-	/** Accepted for MobX compatibility and ignored: sobx never uses `Proxy`. */
+	/** `false`: don't put this object behind a `Proxy`. */
 	proxy?: boolean;
 }
 
@@ -106,7 +109,6 @@ function administration(target: object): ProxyLike<AnyRecord> {
 		// Values are enhanced per annotation, not by the store.
 		adm = new ProxyLike<AnyRecord>({}, { deep: false });
 		Object.defineProperty(target, ADMINISTRATION, { value: adm });
-		markObservable(target);
 		observableValues.add(target);
 	}
 	return adm;
@@ -127,7 +129,7 @@ function computedOf<T>(
 	}
 	let computed = map.get(key) as Computed<T> | undefined;
 	if (!computed) {
-		computed = createComputed(() => getter.call(target), options);
+		computed = createComputed(() => getter.call(proxyOf(target)), options);
 		map.set(key, computed as Computed<unknown>);
 	}
 	return computed;
@@ -196,9 +198,11 @@ function infer(
 ): Annotation {
 	const autoBind = !!options.autoBind;
 	if (descriptor.get) return { kind: "computed" };
-	if (isGenerator(descriptor.value)) return { kind: "flow", bound: autoBind };
+	if (isGenerator(descriptor.value)) {
+		return { kind: "flow", bound: autoBind, inferred: true };
+	}
 	if (typeof descriptor.value === "function") {
-		return { kind: "autoAction", bound: autoBind };
+		return { kind: "autoAction", bound: autoBind, inferred: true };
 	}
 	return {
 		kind: "observable",
@@ -258,7 +262,7 @@ function apply(
 				get: () => computed.get(),
 				set: setter
 					? (value) => {
-							setter.call(target, value);
+							setter.call(proxyOf(target), value);
 						}
 					: undefined,
 				enumerable: false,
@@ -274,13 +278,14 @@ function apply(
 			}
 			const bound = annotation.bound || options.autoBind;
 			const wrapped = createAction(
-				bound ? fn.bind(target) : fn,
+				bound ? fn.bind(proxyOf(target)) : fn,
 				annotation.kind === "action",
 			);
 			Object.defineProperty(target, key, {
 				value: wrapped,
 				writable: true,
-				enumerable: descriptor.enumerable,
+				// As in MobX: methods that were inferred stay enumerable, annotated ones don't.
+				enumerable: annotation.inferred && descriptor.enumerable,
 				configurable: true,
 			});
 			return;
@@ -292,9 +297,9 @@ function apply(
 			}
 			const bound = annotation.bound || options.autoBind;
 			Object.defineProperty(target, key, {
-				value: createFlow(bound ? fn.bind(target) : fn),
+				value: createFlow(bound ? fn.bind(proxyOf(target)) : fn),
 				writable: true,
-				enumerable: descriptor.enumerable,
+				enumerable: annotation.inferred && descriptor.enumerable,
 				configurable: true,
 			});
 			return;
@@ -404,8 +409,8 @@ function createObservableObject<T extends object>(
 			"sobx: observable() supports plain objects, arrays, Maps and Sets.",
 		);
 	}
-	// Accessors (plus, with `configure({ useProxies: "always" })`, a `Proxy` in front, for code
-	// the compiler doesn't process). The `proxy` option is accepted and ignored.
+	// Accessors, behind a `Proxy` for the operations accessors can't observe (unless proxies are
+	// off: `configure({ useProxies: "never" })`, or the `proxy: false` option).
 	const result = Object.create(Object.getPrototypeOf(value)) as T;
 	for (const key of Reflect.ownKeys(value)) {
 		const descriptor = Object.getOwnPropertyDescriptor(
@@ -419,7 +424,8 @@ function createObservableObject<T extends object>(
 	}
 	// Registered before its values are converted, so cyclic / shared values convert once.
 	administration(result);
-	const observable = maybeProxy(result, "object");
+	const observable =
+		options.proxy === false ? result : maybeProxy(result, "object");
 	convertingTo(value, observable, () =>
 		makeAutoObservable(result, overrides, options),
 	);
@@ -457,6 +463,7 @@ export function addObservableProperty(
 	key: PropertyKey,
 	value: unknown,
 ): void {
+	target = rawOf(target);
 	const adm = administration(target);
 	const prepare = enhancerFor({ kind: "observable", modifier: "deep" });
 	Object.defineProperty(target, key, {
@@ -481,12 +488,15 @@ export function removeObservableProperty(
 	target: object,
 	key: PropertyKey,
 ): void {
+	target = rawOf(target);
 	const adm = administrationOf(target);
 	startBatch();
 	try {
 		delete (target as AnyRecord)[key];
 		if (adm) {
-			adm.delete(key);
+			// Keys that aren't observable (methods, Object.defineProperty) aren't in the store.
+			if (adm.owns(key)) adm.delete(key);
+			else adm.keyRedefined(key);
 		}
 		notifyOwners(target);
 	} finally {

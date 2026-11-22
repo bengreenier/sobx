@@ -1,33 +1,47 @@
 /**
- * `configure({ useProxies: "always" })`: observable objects and arrays behind a `Proxy`, for code
- * the compiler doesn't process. Existing keys still go through the observable's accessors (and
- * array methods run on the array itself); the traps handle what only a `Proxy` can observe in
- * plain JavaScript, through the same helpers compiled code uses.
+ * Observable objects and arrays are behind a `Proxy`, as in MobX, so that any code (compiled or
+ * not) observes everything on them. Existing keys go through the observable's accessors, and
+ * array methods run on the array itself; the traps handle what accessors can't observe. Traps
+ * get the observable itself as `target`, and the runtime only works on that, so a trap only ever
+ * runs for user code.
  */
+import { deleteProperty } from "./api.js";
 import {
-	deleteProperty,
-	getProperty,
-	hasProperty,
-	keysOf,
-	setProperty,
-} from "./api.js";
-import { isIndexKey, type ObservableArray } from "./collections.js";
-import { hooks } from "./core.js";
+	isIndexKey,
+	type ObservableArray,
+	observeRawArray,
+} from "./collections.js";
+import { endBatch, globalState, hooks, proxyOf, startBatch } from "./core.js";
+import { addObservableProperty, administrationOf } from "./observable.js";
+import type { ProxyLike } from "./proxy-like.js";
 
 type AnyRecord = Record<PropertyKey, unknown>;
 
+const admOf = (target: object) =>
+	administrationOf(target) as ProxyLike<AnyRecord>;
+
 const objectHandler: ProxyHandler<AnyRecord> = {
 	get(target, key, receiver) {
-		if (typeof key === "symbol" || key in target) {
-			return Reflect.get(target, key, receiver);
+		// Observable properties: straight from the store (as their accessors do).
+		const adm = admOf(target);
+		if (typeof key === "string" && adm.owns(key)) return adm.read(key);
+		const value = Reflect.get(target, key, receiver);
+		if (value !== undefined || typeof key === "symbol" || key in target) {
+			return value;
 		}
-		return getProperty(target, key); // tracked: the key may be added later
+		// Tracked: the key may be added later.
+		return globalState.tracking === null ? undefined : adm.get(key);
 	},
-	set(target, key, value) {
+	set(target, key, value, receiver) {
 		if (typeof key === "symbol" || Object.hasOwn(target, key)) {
-			return Reflect.set(target, key, value, target);
+			target[key] = value; // the accessor
+			return true;
 		}
-		setProperty(target, key, value); // a new observable property
+		// Inherited from an object whose prototype is the observable: not ours.
+		if (receiver !== proxyOf(target)) {
+			return Reflect.set(target, key, value, receiver);
+		}
+		addObservableProperty(target, key, value);
 		return true;
 	},
 	deleteProperty(target, key) {
@@ -37,68 +51,73 @@ const objectHandler: ProxyHandler<AnyRecord> = {
 		return deleteProperty(target, key);
 	},
 	has(target, key) {
-		return typeof key === "symbol"
-			? Reflect.has(target, key)
-			: hasProperty(target, key);
+		if (globalState.tracking !== null && typeof key !== "symbol") {
+			admOf(target).has(key);
+		}
+		return key in target;
 	},
 	ownKeys(target) {
-		keysOf(target); // tracks the keys
+		admOf(target).observeKeys();
 		return Reflect.ownKeys(target);
+	},
+	defineProperty(target, key, descriptor) {
+		if (typeof key === "symbol") {
+			return Reflect.defineProperty(target, key, descriptor);
+		}
+		// Replaces an observable property with a plain one, as in MobX.
+		const adm = admOf(target);
+		startBatch();
+		try {
+			if (adm.owns(key)) adm.delete(key);
+			const defined = Reflect.defineProperty(target, key, descriptor);
+			adm.keyRedefined(key);
+			return defined;
+		} finally {
+			endBatch();
+		}
 	},
 };
 
-function arrayHandler(): ProxyHandler<ObservableArray<unknown>> {
-	// Methods run on the array itself (they notify once), and return the proxy for `this`.
-	const methods = new Map<unknown, unknown>();
-	let proxy: unknown;
-	return {
-		get(target, key, receiver) {
-			proxy = receiver;
-			if (key === "length" || (typeof key === "string" && isIndexKey(key))) {
-				return getProperty(target, key);
-			}
-			const value = Reflect.get(target, key, target);
-			if (typeof value !== "function" || key === "constructor") return value;
-			let method = methods.get(value);
-			if (!method) {
-				method = function (this: unknown, ...args: unknown[]) {
-					const self = this === proxy ? target : this;
-					const result = (value as (...a: unknown[]) => unknown).apply(
-						self,
-						args,
-					);
-					return result === target ? proxy : result;
-				};
-				methods.set(value, method);
-			}
-			return method;
-		},
-		set(target, key, value) {
-			if (key === "length" || (typeof key === "string" && isIndexKey(key))) {
-				setProperty(target, key, value);
-				return true;
-			}
-			return Reflect.set(target, key, value, target);
-		},
-		deleteProperty(target, key) {
-			if (typeof key === "string" && isIndexKey(key)) {
-				return deleteProperty(target, key);
-			}
-			return Reflect.deleteProperty(target, key);
-		},
-		has(target, key) {
-			return typeof key === "symbol"
-				? Reflect.has(target, key)
-				: hasProperty(target, key);
-		},
-		ownKeys(target) {
-			getProperty(target, "length"); // tracks the array
-			return Reflect.ownKeys(target);
-		},
-	};
-}
+const isArrayKey = (key: PropertyKey) =>
+	typeof key === "string" && (key === "length" || isIndexKey(key));
+
+const arrayHandler: ProxyHandler<ObservableArray<unknown>> = {
+	get(target, key, receiver) {
+		if (isArrayKey(key)) {
+			observeRawArray(target);
+			return target[key as never];
+		}
+		return Reflect.get(target, key, receiver);
+	},
+	set(target, key, value) {
+		if (isArrayKey(key)) {
+			if (key === "length") target.setLength(Number(value));
+			else target.set(Number(key), value);
+			return true;
+		}
+		return Reflect.set(target, key, value, target);
+	},
+	deleteProperty(target, key) {
+		return isArrayKey(key)
+			? deleteProperty(target, key)
+			: Reflect.deleteProperty(target, key);
+	},
+	has(target, key) {
+		observeRawArray(target);
+		return key in target;
+	},
+	ownKeys(target) {
+		observeRawArray(target);
+		return Reflect.ownKeys(target);
+	},
+	defineProperty(target, key, descriptor) {
+		return isArrayKey(key)
+			? target.defineKey(key, descriptor)
+			: Reflect.defineProperty(target, key, descriptor);
+	},
+};
 
 hooks.proxy = <T extends object>(raw: T, kind: "object" | "array"): T =>
 	(kind === "array"
-		? new Proxy(raw as unknown as ObservableArray<unknown>, arrayHandler())
+		? new Proxy(raw as unknown as ObservableArray<unknown>, arrayHandler)
 		: new Proxy(raw as AnyRecord, objectHandler)) as unknown as T;

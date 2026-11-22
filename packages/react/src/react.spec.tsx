@@ -259,11 +259,9 @@ describe("hooks and components", () => {
 	});
 });
 
-describe("useProxies (code the compiler doesn't process)", () => {
-	afterEach(() => configure({ useProxies: "never" }));
-
+describe("plain JavaScript on observables", () => {
 	it("observer components see keys added, deleted and enumerated with plain JavaScript", () => {
-		configure({ useProxies: "always", enforceActions: "never" });
+		configure({ enforceActions: "never" });
 		const tags = observable({} as Record<string, number>);
 		const list = observable([1]);
 		const View = observer(() => (

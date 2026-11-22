@@ -88,7 +88,7 @@ describe("transformSobx", () => {
 		const input = `import { observable, reaction } from "mobx";
 const store = observable({ count: 0 });
 reaction(() => store.count, (n) => console.log(n));`;
-		const output = compile(input, { modules: "sobx" });
+		const output = compile(input);
 		// Should be unchanged: no ProxyLike, no .get/.set, reaction() not compiled
 		expect(output).toContain('from "mobx"');
 		expect(output).not.toContain("ProxyLike");
@@ -96,9 +96,6 @@ reaction(() => store.count, (n) => console.log(n));`;
 		expect(output).not.toContain("addObserver");
 		expect(output).toMatch(/observable\s*\(\s*\{\s*count:\s*0\s*\}/);
 		expect(output).toMatch(/reaction\s*\(\s*\(\)\s*=>\s*store\.count/);
-		// Compiling every module (the default), the store is a value whose origin can't be
-		// traced: its reads go through the helpers when it's an observable.
-		expect(compile(input)).toContain('__sobx_getProperty(store, "count")');
 	});
 
 	it("respects moduleSpecifier option (custom module specifier)", () => {

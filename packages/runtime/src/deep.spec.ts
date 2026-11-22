@@ -150,8 +150,8 @@ describe("observable arrays", () => {
 		expect(seen).toEqual(["0", "1"]);
 	});
 
-	// Not in the "proxies" test project, where observables are behind proxies.
-	it.skipIf(process.env.SOBX_USE_PROXIES)(
+	// The "no-proxies" test project only: observables are behind proxies by default.
+	it.runIf(process.env.SOBX_NO_PROXIES)(
 		"is never a Proxy, and plain index / length reads aren't tracked on their own",
 		() => {
 			const a = observable([1]);

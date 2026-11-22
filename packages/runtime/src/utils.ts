@@ -106,11 +106,10 @@ export interface ConfigureOptions {
 	 */
 	enforceActions?: EnforceActions;
 	/**
-	 * `"always"` / `"ifavailable"`: observable objects and arrays created from now on are put
-	 * behind a `Proxy`, so code the compiler doesn't process (libraries, modules excluded from
-	 * compilation) is observed too: keys that don't exist yet, new keys, `delete`, `in`, key
-	 * enumeration, array index and `length`. Slower than compiled code, which keeps its fast
-	 * paths. `"never"` (default): no proxies.
+	 * Whether observable objects and arrays created from now on are behind a `Proxy`, so that any
+	 * code observes everything on them: `"always"` (default) or `"ifavailable"`. With `"never"`,
+	 * adding / deleting keys, `in`, `Object.keys` and array index / `length` need the explicit
+	 * API (`set`, `remove`, `has`, `keys`...) where the compiler can't see the observable.
 	 */
 	useProxies?: "always" | "ifavailable" | "never";
 }

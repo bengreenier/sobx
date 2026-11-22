@@ -19,8 +19,8 @@ import * as sobxRuntime from "@sobx/runtime";
 import { autorun, configure, observable, reaction, runInAction } from "mobx";
 
 configure({ enforceActions: "always" });
-// SOBX_USE_PROXIES=1: sobx with configure({ useProxies: "always" }) (observables behind proxies).
-if (process.env.SOBX_USE_PROXIES) sobxRuntime.configure({ useProxies: "always" });
+// SOBX_NO_PROXIES=1: sobx with configure({ useProxies: "never" }).
+if (process.env.SOBX_NO_PROXIES) sobxRuntime.configure({ useProxies: "never" });
 
 const ITERATIONS = 500_000;
 const ROUNDS = 5;

@@ -26,7 +26,7 @@ function parity(name: string, scenario: Scenario) {
 
 beforeAll(() => {
 	mobx.configure({ enforceActions: "never" });
-	sobx.configure({ enforceActions: "never", useProxies: "always" });
+	sobx.configure({ enforceActions: "never", useProxies: "always" }); // also in the "no-proxies" project
 });
 afterAll(() => {
 	mobx.configure({ enforceActions: "observed" });

@@ -26,11 +26,11 @@ export default defineConfig({
 			{
 				extends: true,
 				test: {
-					name: "proxies",
+					name: "no-proxies",
 					include: ["**/*.spec.ts"],
 					environment: "node",
-					env: { SOBX_USE_PROXIES: "1" },
-					setupFiles: ["test/use-proxies.ts"],
+					env: { SOBX_NO_PROXIES: "1" },
+					setupFiles: ["test/no-proxies.ts"],
 				},
 			},
 			{

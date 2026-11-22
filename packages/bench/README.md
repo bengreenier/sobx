@@ -1,6 +1,6 @@
 # @sobx/bench
 
-Runtime benchmarks: MobX vs the same code compiled by `@sobx/compiler` (running on `@sobx/runtime`'s `ProxyLike`), in `node:vm`. Each fixture runs in a function that receives the APIs as parameters (local bindings, as a module's imports are; a vm context's globals are much slower to read). `plain-code-in-compiled-module` and `plain-code-in-derivation` measure the compiler's rewrites on plain values, outside and inside a derivation; `runtime-object-reaction` uses a runtime (accessor-based) observable. `SOBX_USE_PROXIES=1` runs sobx with `configure({ useProxies: "always" })`. Run with:
+Runtime benchmarks: MobX vs the same code compiled by `@sobx/compiler` (running on `@sobx/runtime`'s `ProxyLike`), in `node:vm`. Each fixture runs in a function that receives the APIs as parameters (local bindings, as a module's imports are; a vm context's globals are much slower to read). `plain-code-in-compiled-module` and `plain-code-in-derivation` have no observables: both columns are plain JavaScript (the compiler must not slow it down). The `runtime-*` fixtures use a store that is passed around (behind a `Proxy` in both libraries). `SOBX_NO_PROXIES=1` runs sobx with `configure({ useProxies: "never" })`. Run with:
 
 ```bash
 pnpm bench

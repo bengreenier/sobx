@@ -14,7 +14,6 @@ import {
 	DEFAULT_MODULE_SPECIFIER,
 	runtimeImport,
 	SobxCompileError,
-	shouldCompile,
 } from "../transform.js";
 
 /**
@@ -31,8 +30,6 @@ export interface SobxTransformerOptions {
 	moduleSpecifier?: string;
 	/** Per-code severity overrides for diagnostics. */
 	diagnostics?: DiagnosticsConfig;
-	/** Which modules to compile (default `"all"`); see `TransformSobxOptions.modules`. */
-	modules?: "all" | "sobx";
 	/** Where warnings go. Default `console.warn`. */
 	warn?: (message: string) => void;
 }
@@ -57,7 +54,6 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 	const {
 		moduleSpecifier = DEFAULT_MODULE_SPECIFIER,
 		diagnostics,
-		modules,
 		warn = console.warn,
 	} = typeof options === "string" ? { moduleSpecifier: options } : options;
 	// Per-file state, keyed by module id.
@@ -65,14 +61,13 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 	const stateFor = (code: string, id: string): FileState => {
 		let state = files.get(id);
 		if (state?.code !== code) {
-			const program = shouldCompile(code, { moduleSpecifier, modules })
+			const program = code.includes(moduleSpecifier)
 				? babelParse(code, getLang(id), { plugins: [...PARSER_PLUGINS] })
 				: t.program([]);
 			const unit = compileUnit(program, code, {
 				moduleSpecifier,
 				filename: id,
 				diagnostics,
-				modules,
 			});
 			const errors = unit.diagnostics.filter((d) => d.severity === "error");
 			if (errors.length > 0) throw new SobxCompileError(errors, id);
@@ -99,9 +94,6 @@ export function SobxTransformer(options: SobxTransformerOptions | string = {}) {
 				t.isUpdateExpression(node) ||
 				t.isUnaryExpression(node) ||
 				t.isBinaryExpression(node) ||
-				t.isSpreadElement(node) ||
-				t.isJSXSpreadAttribute(node) ||
-				t.isForInStatement(node) ||
 				t.isVariableDeclarator(node)
 			);
 		},

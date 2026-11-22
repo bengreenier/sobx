@@ -30,9 +30,9 @@ const Counter = observer(() => {
 });
 ```
 
-Files written against `@sobx/magic` need the [sobx compiler](../compiler); `.tsx` / `.jsx` files are compiled like any other. `@sobx/react` itself isn't compiled: it's a library on top of [`@sobx/runtime`](../runtime).
+Modules that import `@sobx/magic` need the [sobx compiler](../compiler); `.tsx` / `.jsx` files are compiled like any other. `@sobx/react` itself isn't compiled: it's a library on top of [`@sobx/runtime`](../runtime).
 
-Observables a component gets from props, context, a hook or another module are values the compiler can't trace, so it compiles the operations on them that only a `Proxy` would observe (keys that don't exist yet, new keys, `delete`, `in`, `Object.keys`, spreads including `<C {...store} />`, array index / `length`...) to runtime calls, which behave as plain JavaScript on plain values. `useLocalObservable(() => ({...}))` is analyzed from its object literal. Components and libraries the compiler doesn't process (in `node_modules`) are covered by `configure({ useProxies: "always" })`. See [what's supported](../../docs/support.md#values-whose-origin-cant-be-traced).
+Observables a component gets from props, context, a hook or another module are behind a `Proxy`, as in MobX, so they're observed however the component uses them (`store?.later`, `const { later } = store`, `<C {...store} />`...), whether or not it's compiled.
 
 ## Install
 

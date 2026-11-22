@@ -40,7 +40,7 @@ export function useAsObservableSource<TSource extends object>(
 		"[sobx-react] 'useAsObservableSource' is deprecated, please store the values directly in an observable, for example by using 'useLocalObservable', and sync future updates using 'useEffect' when needed.",
 	);
 	const source = useState(() => observable(current, {}, { deep: false }))[0];
-	// `set` (not Object.assign): sobx doesn't use Proxy, so new keys must be added explicitly.
+	// `set` (not Object.assign): works without proxies (`useProxies: "never"`) too.
 	runInAction(() => set(source, current as Record<string, unknown>));
 	return source;
 }

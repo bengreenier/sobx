@@ -16,7 +16,7 @@ export interface SobxCompilerOptions {
 	 */
 	exclude?: string | RegExp | (string | RegExp)[];
 	/**
-	 * Module specifier to treat as sobx: its imports are redirected to `@sobx/runtime`. Default `"@sobx/magic"`.
+	 * Module specifier to treat as sobx (only transform when imported from here). Default `"@sobx/magic"`.
 	 */
 	moduleSpecifier?: string;
 	/**
@@ -24,13 +24,6 @@ export interface SobxCompilerOptions {
 	 * logged, `"info"` / `"off"` are silent), e.g. `{ "deep-mutation": "warning" }`.
 	 */
 	diagnostics?: DiagnosticsConfig;
-	/**
-	 * Which modules to compile: `"all"` (default; property operations on observables passed to
-	 * any of your modules are observed) or `"sobx"` (only modules importing `@sobx/magic` or
-	 * `@sobx/react`: faster builds, other modules must use the explicit API). `node_modules` are
-	 * excluded either way unless `include`d.
-	 */
-	modules?: "all" | "sobx";
 }
 
 export type ASTPluginFactory = (opts: {
@@ -59,13 +52,12 @@ export function createSobxCompiler(ast: ASTPluginFactory) {
 			exclude,
 			moduleSpecifier = DEFAULT_MODULE_SPECIFIER,
 			diagnostics,
-			modules,
 		} = options;
 		return ast({
 			include: include as RegExp,
 			exclude: mergeExclude(exclude),
 			parserOptions: { plugins: [...PARSER_PLUGINS] },
-			transformer: [SobxTransformer({ moduleSpecifier, diagnostics, modules })],
+			transformer: [SobxTransformer({ moduleSpecifier, diagnostics })],
 		});
 	};
 }

@@ -1,10 +1,4 @@
-import type {
-	DiagnosticCode,
-	ObservableId,
-	Options,
-	SobxModule,
-	Span,
-} from "@sobx/ast";
+import type { DiagnosticCode, Options, SobxModule, Span } from "@sobx/ast";
 import { type CompilePlan, spanKey } from "./plan.js";
 
 /** Codes the compiler adds on top of the analyzer's. */
@@ -13,7 +7,7 @@ export type CompilerDiagnosticCode =
 	| "unsupported-option"
 	/** An observable left to the runtime (accessor-based) instead of the `ProxyLike` fast path. */
 	| "runtime-observable"
-	/** A write to an observable that would not be observed and couldn't be compiled. */
+	/** A write to an observable that couldn't be compiled (observed by its proxy, unless `useProxies: "never"`). */
 	| "uncompiled-write";
 
 export type CompileDiagnosticCode = DiagnosticCode | CompilerDiagnosticCode;
@@ -65,7 +59,7 @@ export const DEFAULT_SEVERITY: Record<CompileDiagnosticCode, CompileSeverity> =
 		"make-observable-outside-constructor": "info",
 		"unresolved-import": "info",
 		"runtime-observable": "info",
-		"uncompiled-write": "error",
+		"uncompiled-write": "info",
 		"opaque-observable": "info",
 	};
 
@@ -95,28 +89,11 @@ export function compileDiagnostics(
 		out.push({ code, severity, message, span });
 	};
 
-	const explicitApi =
-		" sobx doesn't use Proxy, so this isn't observed: use the explicit API instead (set, remove, has, get, keys, values, entries from @sobx/magic).";
 	for (const d of mod.diagnostics) {
 		const rewritable =
 			d.code === "dynamic-key" || d.code === "unsupported-operation";
 		// Rewritten to runtime helpers that are observed.
 		if (rewritable && plan.rewritten.has(spanKey(d.span))) continue;
-		const onRuntimeTarget = (d.related ?? []).some((id) =>
-			plan.runtimeTargets.has(id as ObservableId),
-		);
-		if (d.code === "unsupported-operation" && onRuntimeTarget) {
-			const severity = config[d.code] ?? "error";
-			if (severity !== "off") {
-				out.push({
-					code: d.code,
-					severity,
-					message: d.message + explicitApi,
-					span: d.span,
-				});
-			}
-			continue;
-		}
 		push(d.code, d.message, d.span);
 	}
 	for (const u of plan.uncompiled) push("uncompiled-write", u.message, u.span);
